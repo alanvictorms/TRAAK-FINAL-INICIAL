@@ -19,6 +19,7 @@ from routes.operate_routes import router as operate_router
 from routes.prove_routes import router as prove_router
 from routes.platform_routes import router as platform_router
 from routes.copilot_routes import router as copilot_router
+from routes.webhook_routes import router as webhook_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ app.include_router(operate_router)
 app.include_router(prove_router)
 app.include_router(platform_router)
 app.include_router(copilot_router)
+app.include_router(webhook_router)
 
 
 @app.get("/api")

@@ -13,16 +13,102 @@ import { Plus, Search, Radar, Settings, TestTube, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PROVIDERS = [
-  { id: 'tap', name: 'TAP', category: 'revenue', desc: 'Revenue provider — postback S2S' },
-  { id: 'meta', name: 'Meta Ads', category: 'acquisition', desc: 'Leitura de mídia e CAPI' },
-  { id: 'google', name: 'Google Ads', category: 'acquisition', desc: 'Campanhas e conversões' },
-  { id: 'tiktok', name: 'TikTok', category: 'acquisition', desc: 'Ads e Events API' },
-  { id: 'telegram', name: 'Telegram', category: 'messaging', desc: 'Bot, canais e atendimento' },
-  { id: 'whatsapp', name: 'WhatsApp', category: 'messaging', desc: 'Canal de atendimento' },
-  { id: 'zenvia_sms', name: 'Zenvia SMS', category: 'messaging', desc: 'Envio por segmentos' },
-  { id: 'zenvia_voz', name: 'Zenvia Voz', category: 'messaging', desc: 'Texto para voz' },
-  { id: 'cloudflare', name: 'Cloudflare', category: 'infra', desc: 'Proxy e tracking' },
-  { id: 'openai', name: 'OpenAI', category: 'ia', desc: 'Copiloto e processamento IA' },
+  { id: 'tap', name: 'TAP', category: 'revenue', desc: 'Revenue provider — postback S2S',
+    fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', required: true },
+      { key: 'api_secret', label: 'API Secret', type: 'password', required: true },
+      { key: 'postback_url', label: 'Postback URL (gerado)', type: 'text', readonly: true, placeholder: 'Gerado após salvar' },
+      { key: 'webhook_secret', label: 'Webhook Secret (HMAC)', type: 'password', required: false, hint: 'Para validar assinatura dos postbacks recebidos' },
+    ],
+    capabilities: ['postback_s2s', 'reporting_api', 'reconciliation_d1'],
+    docs: 'Configure credenciais TAP e use o Postback URL gerado para receber eventos de registro, FTD, depósito e saque.'
+  },
+  { id: 'meta', name: 'Meta Ads', category: 'acquisition', desc: 'Leitura de mídia e CAPI',
+    fields: [
+      { key: 'app_id', label: 'App ID', type: 'text', required: true },
+      { key: 'app_secret', label: 'App Secret', type: 'password', required: true },
+      { key: 'access_token', label: 'Access Token', type: 'password', required: true },
+      { key: 'pixel_id', label: 'Pixel ID', type: 'text', required: true },
+      { key: 'ad_account_id', label: 'Ad Account ID', type: 'text', required: true, placeholder: 'act_XXXXXXXXX' },
+    ],
+    capabilities: ['read_media', 'capi_send', 'cost_sync'],
+    docs: 'Conecte sua conta Meta para leitura de campanhas/custos e envio de conversões via CAPI server-side.'
+  },
+  { id: 'google', name: 'Google Ads', category: 'acquisition', desc: 'Campanhas e conversões',
+    fields: [
+      { key: 'customer_id', label: 'Customer ID', type: 'text', required: true, placeholder: 'XXX-XXX-XXXX' },
+      { key: 'mcc_id', label: 'MCC ID (opcional)', type: 'text' },
+      { key: 'developer_token', label: 'Developer Token', type: 'password', required: true },
+      { key: 'client_id', label: 'OAuth Client ID', type: 'text', required: true },
+      { key: 'client_secret', label: 'OAuth Client Secret', type: 'password', required: true },
+      { key: 'refresh_token', label: 'Refresh Token', type: 'password', required: true },
+    ],
+    capabilities: ['read_campaigns', 'read_costs', 'enhanced_conversions'],
+    docs: 'Configure OAuth e Developer Token para leitura de campanhas/custos e Enhanced Conversions.'
+  },
+  { id: 'tiktok', name: 'TikTok', category: 'acquisition', desc: 'Ads e Events API',
+    fields: [
+      { key: 'app_id', label: 'App ID', type: 'text', required: true },
+      { key: 'app_secret', label: 'App Secret', type: 'password', required: true },
+      { key: 'access_token', label: 'Access Token', type: 'password', required: true },
+      { key: 'pixel_id', label: 'Pixel Code', type: 'text', required: true },
+    ],
+    capabilities: ['read_ads', 'events_api', 'cost_sync'],
+    docs: 'Conecte TikTok for Business para leitura de anúncios e envio de eventos de conversão.'
+  },
+  { id: 'telegram', name: 'Telegram', category: 'messaging', desc: 'Bot, canais e atendimento',
+    fields: [
+      { key: 'bot_token', label: 'Bot Token', type: 'password', required: true, placeholder: '123456:ABC-DEF...' },
+      { key: 'webhook_url', label: 'Webhook URL (gerado)', type: 'text', readonly: true },
+      { key: 'bot_username', label: 'Username do bot', type: 'text', placeholder: '@meubot' },
+    ],
+    capabilities: ['send_message', 'receive_updates', 'deep_link', 'channels'],
+    docs: 'Crie um bot via @BotFather, cole o token aqui. O webhook será configurado automaticamente.'
+  },
+  { id: 'whatsapp', name: 'WhatsApp', category: 'messaging', desc: 'Canal de atendimento',
+    fields: [
+      { key: 'phone_number_id', label: 'Phone Number ID', type: 'text', required: true },
+      { key: 'access_token', label: 'Permanent Access Token', type: 'password', required: true },
+      { key: 'waba_id', label: 'WhatsApp Business Account ID', type: 'text', required: true },
+      { key: 'verify_token', label: 'Webhook Verify Token', type: 'text', required: true },
+    ],
+    capabilities: ['send_message', 'receive_message', 'templates'],
+    docs: 'Configure via Meta for Developers. Envio condicionado a elegibilidade, opt-in e políticas (MSG-02).'
+  },
+  { id: 'zenvia_sms', name: 'Zenvia SMS', category: 'messaging', desc: 'Envio por segmentos',
+    fields: [
+      { key: 'api_token', label: 'API Token', type: 'password', required: true },
+      { key: 'sender_id', label: 'Sender ID (remetente)', type: 'text', required: true },
+    ],
+    capabilities: ['send_sms', 'delivery_receipt'],
+    docs: 'Token da API Zenvia para envio de SMS. Preços reais dependem do contrato com a Zenvia.'
+  },
+  { id: 'zenvia_voz', name: 'Zenvia Voz', category: 'messaging', desc: 'Texto para voz',
+    fields: [
+      { key: 'api_token', label: 'API Token', type: 'password', required: true },
+      { key: 'caller_id', label: 'Caller ID (número)', type: 'text', required: true },
+    ],
+    capabilities: ['tts_call', 'call_status'],
+    docs: 'Chamadas TTS via Zenvia. Custo por duração conforme contrato.'
+  },
+  { id: 'cloudflare', name: 'Cloudflare', category: 'infra', desc: 'Proxy e tracking',
+    fields: [
+      { key: 'api_token', label: 'API Token', type: 'password', required: true },
+      { key: 'zone_id', label: 'Zone ID', type: 'text', required: true },
+      { key: 'account_id', label: 'Account ID', type: 'text', required: true },
+    ],
+    capabilities: ['dns_proxy', 'ssl', 'workers'],
+    docs: 'Proxy/encaminhamento de tracking e postback vinculado aos domínios.'
+  },
+  { id: 'openai', name: 'OpenAI', category: 'ia', desc: 'Copiloto e processamento IA',
+    fields: [
+      { key: 'api_key', label: 'API Key', type: 'password', required: true },
+      { key: 'model', label: 'Modelo padrão', type: 'text', placeholder: 'gpt-5.4-mini' },
+      { key: 'org_id', label: 'Organization ID (opcional)', type: 'text' },
+    ],
+    capabilities: ['chat', 'embeddings'],
+    docs: 'Para o Copiloto. Também configurável em Plataforma > Provedores IA.'
+  },
 ];
 
 const statusColors = { active: 'badge-success', configured: 'badge-info', connected: 'badge-info', available: '', error: 'badge-error', restricted: 'badge-warning' };
@@ -35,7 +121,10 @@ export default function IntegrationsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
-  const [form, setForm] = useState({ provider: '', credentials: '{}', config: '{}' });
+  const [form, setForm] = useState({ provider: '' });
+  const [credFields, setCredFields] = useState({});
+
+  const selectedProvider = PROVIDERS.find(p => p.id === form.provider);
 
   const load = useCallback(async () => {
     try {
@@ -56,24 +145,27 @@ export default function IntegrationsPage() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    const provider = PROVIDERS.find(p => p.id === form.provider);
+    const provider = selectedProvider;
     if (!provider) return;
     try {
-      let creds = {};
-      let config = {};
-      try { creds = JSON.parse(form.credentials); } catch {}
-      try { config = JSON.parse(form.config); } catch {}
+      // Validate required fields
+      const missing = (provider.fields || []).filter(f => f.required && !credFields[f.key]);
+      if (missing.length > 0) {
+        toast.error(`Preencha: ${missing.map(f => f.label).join(', ')}`);
+        return;
+      }
       await api.post('/integrations', {
         provider: provider.id,
         category: provider.category,
         name: provider.name,
-        credentials: creds,
-        config,
-        capabilities: [],
+        credentials: credFields,
+        config: {},
+        capabilities: provider.capabilities || [],
       });
       toast.success('Integração criada');
       setShowCreate(false);
-      setForm({ provider: '', credentials: '{}', config: '{}' });
+      setForm({ provider: '' });
+      setCredFields({});
       load();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Erro ao criar');
@@ -188,15 +280,14 @@ export default function IntegrationsPage() {
         </Table>
       </div>
 
-      {/* Create Dialog */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent data-testid="create-integration-dialog">
+        <DialogContent className="max-w-lg" data-testid="create-integration-dialog">
           <DialogHeader><DialogTitle>Nova integração</DialogTitle></DialogHeader>
           <form onSubmit={handleCreate}>
             <div className="space-y-4">
               <div>
                 <Label className="text-xs">Provedor</Label>
-                <Select value={form.provider} onValueChange={v => setForm(f => ({ ...f, provider: v }))}>
+                <Select value={form.provider} onValueChange={v => { setForm({ provider: v }); setCredFields({}); }}>
                   <SelectTrigger className="text-xs mt-1"><SelectValue placeholder="Selecione..." /></SelectTrigger>
                   <SelectContent>
                     {PROVIDERS.map(p => (
@@ -205,14 +296,39 @@ export default function IntegrationsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label className="text-xs">Credenciais (JSON)</Label>
-                <Textarea className="text-xs mt-1 font-mono" rows={4} value={form.credentials} onChange={e => setForm(f => ({ ...f, credentials: e.target.value }))} placeholder='{"api_key": "...", "secret": "..."}' />
-              </div>
-              <div>
-                <Label className="text-xs">Configuração (JSON)</Label>
-                <Textarea className="text-xs mt-1 font-mono" rows={3} value={form.config} onChange={e => setForm(f => ({ ...f, config: e.target.value }))} placeholder='{"webhook_url": "..."}' />
-              </div>
+              {selectedProvider && (
+                <>
+                  {selectedProvider.docs && (
+                    <div className="text-[10px] text-muted-foreground bg-muted p-3 rounded-md leading-relaxed">{selectedProvider.docs}</div>
+                  )}
+                  {(selectedProvider.fields || []).map(field => (
+                    <div key={field.key}>
+                      <Label className="text-xs">{field.label} {field.required && <span className="text-destructive">*</span>}</Label>
+                      <Input
+                        className="text-xs mt-1 font-mono"
+                        type={field.type === 'password' ? 'password' : 'text'}
+                        placeholder={field.placeholder || ''}
+                        value={credFields[field.key] || ''}
+                        onChange={e => setCredFields(prev => ({ ...prev, [field.key]: e.target.value }))}
+                        readOnly={field.readonly}
+                        required={field.required}
+                        data-testid={`field-${field.key}`}
+                      />
+                      {field.hint && <p className="text-[9px] text-muted-foreground mt-1">{field.hint}</p>}
+                    </div>
+                  ))}
+                  {selectedProvider.capabilities && (
+                    <div>
+                      <Label className="text-xs mb-1 block">Capacidades</Label>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedProvider.capabilities.map(c => (
+                          <Badge key={c} variant="outline" className="text-[8px]">{c}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <DialogFooter className="mt-4">
               <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button>
@@ -226,28 +342,59 @@ export default function IntegrationsPage() {
       <Dialog open={!!showDetail} onOpenChange={() => setShowDetail(null)}>
         <DialogContent className="max-w-lg" data-testid="integration-detail-dialog">
           <DialogHeader><DialogTitle>{showDetail?.name}</DialogTitle></DialogHeader>
-          {showDetail && (
-            <Tabs defaultValue="overview">
-              <TabsList className="w-full">
-                <TabsTrigger value="overview" className="text-xs flex-1">Visão</TabsTrigger>
-                <TabsTrigger value="config" className="text-xs flex-1">Configuração</TabsTrigger>
-                <TabsTrigger value="logs" className="text-xs flex-1">Logs</TabsTrigger>
-              </TabsList>
-              <TabsContent value="overview" className="space-y-3 mt-3">
-                <div className="text-xs"><span className="text-muted-foreground">Provedor:</span> {showDetail.provider}</div>
-                <div className="text-xs"><span className="text-muted-foreground">Categoria:</span> {showDetail.category}</div>
-                <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{showDetail.status}</Badge></div>
-                <div className="text-xs"><span className="text-muted-foreground">Criada:</span> {new Date(showDetail.created_at).toLocaleString('pt-BR')}</div>
-              </TabsContent>
-              <TabsContent value="config" className="mt-3">
-                <div className="text-xs text-muted-foreground mb-2">Credenciais configuradas:</div>
-                <pre className="text-[10px] bg-muted p-3 rounded-md overflow-auto">{JSON.stringify(showDetail.credentials_masked || showDetail.credentials, null, 2)}</pre>
-              </TabsContent>
-              <TabsContent value="logs" className="mt-3">
-                <p className="text-xs text-muted-foreground">Logs de atividade aparecerão aqui conforme eventos forem processados.</p>
-              </TabsContent>
-            </Tabs>
-          )}
+          {showDetail && (() => {
+            const prov = PROVIDERS.find(p => p.id === showDetail.provider);
+            return (
+              <Tabs defaultValue="overview">
+                <TabsList className="w-full">
+                  <TabsTrigger value="overview" className="text-xs flex-1">Visão</TabsTrigger>
+                  <TabsTrigger value="config" className="text-xs flex-1">Credenciais</TabsTrigger>
+                  <TabsTrigger value="capabilities" className="text-xs flex-1">Capacidades</TabsTrigger>
+                  <TabsTrigger value="logs" className="text-xs flex-1">Logs</TabsTrigger>
+                </TabsList>
+                <TabsContent value="overview" className="space-y-3 mt-3">
+                  <div className="text-xs"><span className="text-muted-foreground">Provedor:</span> {showDetail.provider}</div>
+                  <div className="text-xs"><span className="text-muted-foreground">Categoria:</span> {showDetail.category}</div>
+                  <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{showDetail.status}</Badge></div>
+                  <div className="text-xs"><span className="text-muted-foreground">Criada:</span> {new Date(showDetail.created_at).toLocaleString('pt-BR')}</div>
+                  {showDetail.last_test && <div className="text-xs"><span className="text-muted-foreground">Último teste:</span> {showDetail.last_test.status} em {new Date(showDetail.last_test.tested_at).toLocaleString('pt-BR')}</div>}
+                  {prov?.docs && <div className="text-[10px] text-muted-foreground bg-muted p-3 rounded-md mt-2">{prov.docs}</div>}
+                </TabsContent>
+                <TabsContent value="config" className="mt-3 space-y-2">
+                  {prov?.fields ? prov.fields.map(f => (
+                    <div key={f.key} className="text-xs">
+                      <span className="text-muted-foreground">{f.label}:</span>{' '}
+                      <span className="font-mono">{showDetail.credentials_masked?.[f.key] || showDetail.credentials?.[f.key] || '—'}</span>
+                    </div>
+                  )) : (
+                    <pre className="text-[10px] bg-muted p-3 rounded-md overflow-auto">{JSON.stringify(showDetail.credentials_masked || showDetail.credentials, null, 2)}</pre>
+                  )}
+                  {showDetail.provider === 'tap' && (
+                    <div className="stat-card p-3 mt-3">
+                      <p className="text-[10px] font-medium text-foreground mb-1">Postback URL</p>
+                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">
+                        {`${window.location.origin}/api/webhooks/tap`}
+                      </code>
+                      <p className="text-[9px] text-muted-foreground mt-1">Configure esta URL no painel TAP para receber postbacks de registro, FTD, depósito e saque.</p>
+                    </div>
+                  )}
+                </TabsContent>
+                <TabsContent value="capabilities" className="mt-3">
+                  <div className="flex flex-wrap gap-2">
+                    {(showDetail.capabilities || prov?.capabilities || []).map(c => (
+                      <Badge key={c} variant="outline" className="text-[9px]">{c}</Badge>
+                    ))}
+                  </div>
+                  {(!showDetail.capabilities || showDetail.capabilities.length === 0) && (!prov?.capabilities || prov.capabilities.length === 0) && (
+                    <p className="text-xs text-muted-foreground">Nenhuma capacidade registrada.</p>
+                  )}
+                </TabsContent>
+                <TabsContent value="logs" className="mt-3">
+                  <p className="text-xs text-muted-foreground">Logs de atividade aparecerão aqui conforme eventos forem processados.</p>
+                </TabsContent>
+              </Tabs>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>
