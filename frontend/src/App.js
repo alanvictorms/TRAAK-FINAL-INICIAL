@@ -13,6 +13,15 @@ import InboxPage from '@/pages/InboxPage';
 import RevenuePage from '@/pages/RevenuePage';
 import PlatformPage from '@/pages/PlatformPage';
 import AnalyticsPage from '@/pages/AnalyticsPage';
+import DomainsPage from '@/pages/DomainsPage';
+import SegmentsPage from '@/pages/SegmentsPage';
+import DisparosPage from '@/pages/DisparosPage';
+import CampaignsPage from '@/pages/CampaignsPage';
+import AutomationsPage from '@/pages/AutomationsPage';
+import ReportsPage from '@/pages/ReportsPage';
+import GovernancePage from '@/pages/GovernancePage';
+import MonitoringPage from '@/pages/MonitoringPage';
+import IdentityPage from '@/pages/IdentityPage';
 import GenericPage from '@/pages/GenericPage';
 import '@/App.css';
 
@@ -41,30 +50,30 @@ function AppRoutes() {
         <Route path="analytics/atendimento" element={<AnalyticsPage tab="atendimento" />} />
         <Route path="integrations" element={<IntegrationsPage />} />
         <Route path="integrations/:id" element={<IntegrationsPage />} />
-        <Route path="domains" element={<GenericPage title="Domínios" module="domains" />} />
-        <Route path="domains/:id" element={<GenericPage title="Domínio" module="domains" />} />
+        <Route path="domains" element={<DomainsPage />} />
+        <Route path="domains/:id" element={<DomainsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
         <Route path="tracking/sources" element={<GenericPage title="Fontes de tráfego" module="sources" />} />
         <Route path="tracking/:id" element={<TrackingPage />} />
         <Route path="ledger" element={<LedgerPage />} />
         <Route path="ledger/:id" element={<LedgerPage />} />
-        <Route path="monitoring" element={<GenericPage title="Monitoramento" module="monitoring" />} />
+        <Route path="monitoring" element={<MonitoringPage />} />
         <Route path="players" element={<PlayersPage />} />
         <Route path="players/:id" element={<PlayersPage />} />
-        <Route path="identity" element={<GenericPage title="Identity Graph" module="identity" />} />
-        <Route path="identity/:id" element={<GenericPage title="Identidade" module="identity" />} />
+        <Route path="identity" element={<IdentityPage />} />
+        <Route path="identity/:id" element={<IdentityPage />} />
         <Route path="inbox" element={<InboxPage />} />
         <Route path="inbox/:id" element={<InboxPage />} />
-        <Route path="automations" element={<GenericPage title="Automações" module="automations" />} />
-        <Route path="automations/:id" element={<GenericPage title="Editor de fluxo" module="automations" />} />
-        <Route path="segments" element={<GenericPage title="Segmentos" module="segments" />} />
-        <Route path="disparos" element={<GenericPage title="Disparos" module="disparos" />} />
-        <Route path="media" element={<GenericPage title="Campanhas" module="campaigns" />} />
-        <Route path="media/:id" element={<GenericPage title="Campanha" module="campaigns" />} />
+        <Route path="automations" element={<AutomationsPage />} />
+        <Route path="automations/:id" element={<AutomationsPage />} />
+        <Route path="segments" element={<SegmentsPage />} />
+        <Route path="disparos" element={<DisparosPage />} />
+        <Route path="media" element={<CampaignsPage />} />
+        <Route path="media/:id" element={<CampaignsPage />} />
         <Route path="revenue" element={<RevenuePage />} />
-        <Route path="reports" element={<GenericPage title="Relatórios" module="reports" />} />
-        <Route path="governance" element={<GenericPage title="Governança" module="governance" />} />
-        <Route path="approvals" element={<GenericPage title="Aprovações" module="approvals" />} />
+        <Route path="reports" element={<ReportsPage />} />
+        <Route path="governance" element={<GovernancePage />} />
+        <Route path="approvals" element={<GovernancePage />} />
         <Route path="settings/general" element={<SettingsPage />} />
         <Route path="settings/team" element={<SettingsPage />} />
         <Route path="settings/api" element={<SettingsPage />} />
