@@ -1,0 +1,117 @@
+@import '@fontsource-variable/inter';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root, .dark {
+    color-scheme: dark;
+    --background: 174 76% 4.9%;
+    --foreground: 94 25.9% 94.7%;
+    --card: 172 59% 7.6%;
+    --card-foreground: 94 25.9% 94.7%;
+    --popover: 166 44.8% 11.4%;
+    --popover-foreground: 94 25.9% 94.7%;
+    --primary: 86 100% 67.5%;
+    --primary-foreground: 92 70.8% 9.4%;
+    --secondary: 160 37.5% 15.7%;
+    --secondary-foreground: 131 23.9% 86.1%;
+    --muted: 165 40% 11.8%;
+    --muted-foreground: 157 11.9% 62.2%;
+    --accent: 148 28.8% 20.4%;
+    --accent-foreground: 94 25.9% 94.7%;
+    --destructive: 348 76.7% 71.4%;
+    --destructive-foreground: 94 25.9% 94.7%;
+    --border: 159 28.9% 17.6%;
+    --input: 159 26.6% 21.4%;
+    --ring: 86 100% 67.5%;
+    --radius: 0.75rem;
+    --chart-1: 86 100% 67.5%;
+    --chart-2: 95 31% 50%;
+    --chart-3: 150 22.9% 37.6%;
+    --chart-4: 85 35.6% 71.4%;
+    --chart-5: 156 15.3% 48.6%;
+  }
+
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter Variable', Inter, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+  }
+
+  ::selection {
+    background: hsl(86 100% 67.5% / 0.25);
+    color: #e9ffd3;
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary));
+    outline-offset: 3px;
+  }
+
+  h1, h2, h3, p { margin: 0; }
+}
+
+/* Shadcn component overrides for Forest/Lime theme */
+[data-slot='button'] {
+  font-weight: 500;
+  border-radius: 7px;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+}
+[data-slot='button']:active:not(:disabled) {
+  transform: translateY(1px);
+}
+[data-slot='input'], [data-slot='textarea'], [data-slot='select-trigger'] {
+  background: hsl(165 40% 9%);
+  box-shadow: none;
+}
+[data-slot='input']:focus-visible, [data-slot='textarea']:focus-visible {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 3px hsl(86 100% 67.5% / 0.06);
+}
+[data-slot='card'] {
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
+  box-shadow: 0 3px 15px rgba(0,0,0,0.06);
+}
+[data-slot='tabs-list'] {
+  background: hsl(166 35% 10%);
+  border-radius: 7px;
+}
+[data-slot='tabs-trigger'][data-state='active'] {
+  color: hsl(var(--foreground));
+  background: hsl(148 25% 22%);
+  box-shadow: inset 0 0 12px hsl(95 40% 50% / 0.07);
+}
+[data-slot='badge'] {
+  font-weight: 500;
+  border-radius: 5px;
+}
+[data-slot='dialog-content'], [data-slot='alert-dialog-content'], [data-slot='sheet-content'] {
+  background: hsl(var(--popover));
+}
+[data-slot='dialog-overlay'], [data-slot='sheet-overlay'], [data-slot='alert-dialog-overlay'] {
+  background: rgba(0, 17, 13, 0.8);
+  backdrop-filter: blur(5px);
+}
+[data-slot='table-row']:hover {
+  background: hsl(86 100% 67.5% / 0.02);
+}
+[data-sonner-toaster] {
+  --normal-bg: hsl(160 30% 14%) !important;
+  --normal-text: hsl(var(--foreground)) !important;
+  --normal-border: hsl(120 20% 30%) !important;
+}
+
+/* Debug wrapper */
+@layer base {
+  [data-debug-wrapper="true"] {
+    display: contents !important;
+  }
+}
