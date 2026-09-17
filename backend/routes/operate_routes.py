@@ -1152,7 +1152,9 @@ async def sync_media(request: Request):
     if not result["synced"] and not result["errors"]:
         raise HTTPException(400, "Nenhuma conta do Meta Ads conectada em Integrações")
     if result["errors"] and not result["synced"]:
-        raise HTTPException(502, result["errors"][0]["error"])
+        # 400 e não 502: o proxy troca o corpo de 5xx por uma página HTML e a
+        # mensagem do Meta nunca chegaria na tela.
+        raise HTTPException(400, result["errors"][0]["error"])
     await audit(user, "media.sync", None, "campaign")
     return result
 
