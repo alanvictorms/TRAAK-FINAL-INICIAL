@@ -5,6 +5,7 @@ from database import db, audit as _audit
 from auth import get_current_user
 from models import IntegrationCreate, IntegrationUpdate, DomainCreate, DomainUpdate, TrackingLinkCreate
 from telegram_service import public_api_base, register_telegram_webhook
+from messaging import notify
 import math
 import secrets
 
@@ -137,6 +138,14 @@ async def test_integration(integration_id: str, request: Request):
     now = datetime.now(timezone.utc)
     test_result = {"status": "success" if doc.get("credentials") else "no_credentials", "tested_at": now.isoformat(), "tested_by": user["_id"]}
     await db.integrations.update_one({"_id": ObjectId(integration_id)}, {"$set": {"last_test": test_result, "updated_at": now}})
+    if test_result["status"] != "success":
+        await notify(
+            user["workspace_id"], "integration_down",
+            f"Integração {doc.get('name') or doc.get('provider')} com problema",
+            "O teste de conexão falhou: credenciais ausentes.",
+            link=f"/integrations/{integration_id}",
+            dedupe_key=f"integration_down:{integration_id}",
+        )
     return test_result
 
 

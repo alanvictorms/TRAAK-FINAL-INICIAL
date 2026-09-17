@@ -4,6 +4,7 @@ from bson import ObjectId
 from database import db
 from auth import get_current_user
 from models import ReportCreate, ApprovalCreate
+from messaging import notify
 import math
 
 router = APIRouter(prefix="/api", tags=["prove"])
@@ -171,6 +172,12 @@ async def create_approval(body: ApprovalCreate, request: Request):
     }
     result = await db.approvals.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
+    await notify(
+        user["workspace_id"], "approval_pending",
+        "Aprovação aguardando decisão",
+        f"{user.get('name') or user.get('email')} propôs {body.type} em {body.object_type}.",
+        link="/approvals",
+    )
     return doc
 
 

@@ -167,6 +167,20 @@
   border-radius: 6px;
   color: hsl(var(--foreground));
 }
+button.topbar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 220px;
+  height: 32px;
+  padding: 0 8px 0 32px;
+  background: hsl(165 35% 8%);
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  cursor: pointer;
+}
+button.topbar-search:hover { border-color: hsl(var(--ring)); }
+button.topbar-search:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
 .mobile-menu-btn { display: none; }
 
 /* ── Main Content ── */
@@ -495,6 +509,9 @@
   .auth-story { display: none; }
   .auth-main { padding: 29px 24px; }
   .topbar { padding: 0 12px; }
+  button.topbar-search { width: 32px; padding: 0; justify-content: center; }
+  button.topbar-search > span, button.topbar-search > kbd { display: none; }
+  button.topbar-search svg { position: static; transform: none; }
   .page-content { padding: 16px 12px; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }

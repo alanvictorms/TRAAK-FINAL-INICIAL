@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from database import db, audit
+from messaging import NOTIFICATION_DEFAULTS, DIGEST_OPTIONS, merge_notification_settings
 from auth import get_current_user, require_admin
 from models import (
     AIProviderCreate, AIProviderUpdate, TenantCreate, PlanCreate,
@@ -285,6 +286,18 @@ async def list_notifications(request: Request, page: int = 1, limit: int = 20):
     return {"items": items, "total": total, "unread": unread}
 
 
+@router.post("/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str, request: Request):
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(notification_id):
+        raise HTTPException(404, "Notificação não encontrada")
+    await db.notifications.update_one(
+        {"_id": ObjectId(notification_id), "user_id": user["_id"]},
+        {"$set": {"read": True}},
+    )
+    return {"detail": "Lida"}
+
+
 @router.post("/notifications/mark-read")
 async def mark_notifications_read(request: Request):
     user = await get_current_user(request)
@@ -293,34 +306,9 @@ async def mark_notifications_read(request: Request):
 
 
 # ── Notification settings ──
-NOTIFICATION_DEFAULTS = {
-    "channels": {"inapp": True, "email": True, "telegram": False},
-    "digest": "daily",
-    "critical": {
-        "integration_down": True,
-        "webhook_failures": True,
-        "ftd_drop": True,
-        "budget_exceeded": True,
-        "approval_pending": True,
-    },
-    "telegram_chat_id": "",
-}
-DIGEST_OPTIONS = {"off", "hourly", "daily", "weekly"}
-
-
-def _merge_notification_settings(saved):
-    saved = saved or {}
-    return {
-        "channels": {**NOTIFICATION_DEFAULTS["channels"], **(saved.get("channels") or {})},
-        "digest": saved.get("digest", NOTIFICATION_DEFAULTS["digest"]),
-        "critical": {**NOTIFICATION_DEFAULTS["critical"], **(saved.get("critical") or {})},
-        "telegram_chat_id": saved.get("telegram_chat_id", ""),
-    }
-
-
 async def _load_notification_settings(ws_id):
     ws = await db.workspaces.find_one({"_id": ObjectId(ws_id)}, {"notification_settings": 1})
-    return _merge_notification_settings((ws or {}).get("notification_settings"))
+    return merge_notification_settings((ws or {}).get("notification_settings"))
 
 
 @router.get("/settings/notifications")
@@ -427,6 +415,48 @@ async def list_audit_log(request: Request, page: int = 1, limit: int = 50):
     for item in items:
         item["_id"] = str(item["_id"])
     return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1}
+
+
+# ── Busca global ──
+# (coleção, rótulo, campos pesquisados, campo exibido, rota da tela)
+SEARCH_TARGETS = [
+    ("players", "Players", ["name", "tags"], "name", "/players/{id}"),
+    ("conversations", "Conversas", ["player_name", "subject", "tags"], "player_name", "/inbox/{id}"),
+    ("tracking_links", "Links", ["name", "slug"], "name", "/tracking/{id}"),
+    ("campaigns", "Campanhas", ["name"], "name", "/media/{id}"),
+    ("automations", "Automações", ["name"], "name", "/automations/{id}"),
+    ("segments", "Segmentos", ["name"], "name", "/segments"),
+    ("integrations", "Integrações", ["name", "provider"], "name", "/integrations/{id}"),
+    ("domains", "Domínios", ["domain"], "domain", "/domains/{id}"),
+    ("reports", "Relatórios", ["name"], "name", "/reports"),
+]
+
+
+@router.get("/search")
+async def global_search(request: Request, q: str = "", limit: int = 5):
+    user = await get_current_user(request)
+    term = q.strip()
+    if len(term) < 2:
+        return {"query": term, "groups": []}
+    # Entrada do usuário vira texto literal, nunca expressão regular.
+    pattern = {"$regex": re.escape(term), "$options": "i"}
+    limit = max(1, min(limit, 10))
+    groups = []
+    for collection, label, fields, display, route in SEARCH_TARGETS:
+        query = {"workspace_id": user["workspace_id"], "$or": [{f: pattern} for f in fields]}
+        docs = await db[collection].find(query, {display: 1, "status": 1}).limit(limit).to_list(limit)
+        if docs:
+            groups.append({
+                "type": collection,
+                "label": label,
+                "items": [{
+                    "id": str(d["_id"]),
+                    "title": d.get(display) or "(sem nome)",
+                    "status": d.get("status"),
+                    "link": route.format(id=str(d["_id"])),
+                } for d in docs],
+            })
+    return {"query": term, "groups": groups}
 
 
 # ── Analytics ──

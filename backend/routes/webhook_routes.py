@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Request, HTTPException
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from database import db
 from bson import ObjectId
-from messaging import ingest_incoming_message
+from messaging import ingest_incoming_message, notify
 import httpx
 import hashlib
 import hmac
@@ -11,6 +11,27 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+
+
+async def _webhook_failed(workspace_id, integration_id, provider, reason):
+    """Conta falhas de webhook e alerta quando se repetem (3 em 15 minutos)."""
+    now = datetime.now(timezone.utc)
+    await db.webhook_failures.insert_one({
+        "workspace_id": workspace_id, "integration_id": integration_id,
+        "provider": provider, "reason": reason, "at": now,
+    })
+    recent = await db.webhook_failures.count_documents({
+        "workspace_id": workspace_id, "integration_id": integration_id,
+        "at": {"$gte": now - timedelta(minutes=15)},
+    })
+    if recent >= 3:
+        await notify(
+            workspace_id, "webhook_failures",
+            f"Webhook {provider} falhando",
+            f"{recent} falhas nos últimos 15 minutos. Última: {reason}.",
+            link=f"/integrations/{integration_id}",
+            dedupe_key=f"webhook_failures:{integration_id}",
+        )
 
 
 async def _find_workspace_for_tap(api_key: str = None):
@@ -83,6 +104,7 @@ async def tap_webhook(request: Request):
     webhook_secret = (integration.get("credentials") or {}).get("webhook_secret", "")
     if webhook_secret and not _verify_signature(payload_bytes, signature, webhook_secret):
         logger.warning(f"TAP webhook signature mismatch for tx={transaction_id}")
+        await _webhook_failed(workspace_id, str(integration["_id"]), "TAP", "assinatura inválida")
         raise HTTPException(401, "Assinatura inválida")
 
     # Deduplication: check if transaction_id already exists
@@ -440,6 +462,7 @@ async def meta_capi(integration_id: str, request: Request):
         )
     if response.status_code >= 400:
         logger.error("Meta CAPI error integration=%s response=%s", integration_id, response.text[:500])
+        await _webhook_failed(integration["workspace_id"], integration_id, "Meta CAPI", f"HTTP {response.status_code}")
         raise HTTPException(502, "Meta rejeitou o evento CAPI")
     graph_response = response.json()
     event_doc = {

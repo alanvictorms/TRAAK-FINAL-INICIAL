@@ -5,12 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader } from '@/components/ui/sheet';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import GlobalSearch from '@/components/topbar/GlobalSearch';
+import NotificationsMenu from '@/components/topbar/NotificationsMenu';
+import CopilotPanel from '@/components/topbar/CopilotPanel';
 import {
   LayoutDashboard, BarChart3, Link2, Globe, Radar, Activity, Users, Fingerprint,
   MessageSquare, Workflow, Target, Send, Megaphone, DollarSign, FileText, Shield, CheckSquare,
-  Settings, UsersRound, Key, Receipt, Bell, ClipboardList, Building2, CreditCard, Bot, Search,
-  Menu, LogOut, ChevronRight, User, Sparkles
+  Settings, UsersRound, Key, Receipt, Bell, ClipboardList, Building2, CreditCard, Bot,
+  Menu, LogOut, ChevronRight, User
 } from 'lucide-react';
 
 const navGroups = [
@@ -201,39 +203,9 @@ export default function Shell() {
           </div>
 
           <div className="topbar-actions">
-            <div className="topbar-search">
-              <Search size={14} />
-              <input placeholder="Buscar..." data-testid="global-search" />
-            </div>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="relative" data-testid="notifications-btn">
-                  <Bell size={16} />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72" align="end">
-                <p className="text-sm font-medium mb-2">Notificações</p>
-                <p className="text-xs text-muted-foreground">Sem notificações pendentes.</p>
-              </PopoverContent>
-            </Popover>
-
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" data-testid="copilot-btn">
-                  <Sparkles size={16} />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-80" align="end">
-                <p className="text-sm font-medium mb-2">Copiloto TrakAquire</p>
-                <p className="text-xs text-muted-foreground mb-3">Pergunte sobre métricas, campanhas ou integrações.</p>
-                <input
-                  className="w-full h-8 text-xs rounded-md border border-border bg-muted px-3"
-                  placeholder="Qual o CPFTD desta semana?"
-                  data-testid="copilot-input"
-                />
-              </PopoverContent>
-            </Popover>
+            <GlobalSearch />
+            <NotificationsMenu />
+            <CopilotPanel />
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

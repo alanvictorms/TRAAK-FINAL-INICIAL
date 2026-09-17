@@ -21,6 +21,8 @@ from routes.platform_routes import router as platform_router
 from routes.copilot_routes import router as copilot_router
 from routes.webhook_routes import router as webhook_router
 from telegram_service import sync_telegram_webhooks
+from messaging import monitor_loop
+import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -127,26 +129,21 @@ async def startup():
         await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_password)}})
         logger.info("Admin password updated")
 
-    # Write test credentials
-    creds_path = Path("/app/memory/test_credentials.md")
-    creds_path.parent.mkdir(parents=True, exist_ok=True)
-    creds_path.write_text(
-        f"# Test Credentials\n\n"
-        f"## Admin Account\n"
-        f"- Email: {admin_email}\n"
-        f"- Password: {admin_password}\n"
-        f"- Role: owner + platform_admin\n\n"
-        f"## Auth Endpoints\n"
-        f"- POST /api/auth/login\n"
-        f"- POST /api/auth/register\n"
-        f"- POST /api/auth/logout\n"
-        f"- GET /api/auth/me\n"
-        f"- POST /api/auth/refresh\n"
-    )
+    await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
+    await db.notifications.create_index([("workspace_id", 1), ("dedupe_key", 1), ("created_at", -1)])
+    await db.webhook_failures.create_index("at", expireAfterSeconds=7 * 24 * 3600)
+
     logger.info("TrakAquire API ready")
     await sync_telegram_webhooks()
+    # ponytail: um processo = um monitor. Com mais de uma réplica, cada uma
+    # rodaria o laço; o dedupe_key evita alerta duplicado, mas vira lock
+    # distribuído se o custo das consultas pesar.
+    app.state.monitor = asyncio.create_task(monitor_loop())
 
 
 @app.on_event("shutdown")
 async def shutdown():
+    monitor = getattr(app.state, "monitor", None)
+    if monitor:
+        monitor.cancel()
     client.close()

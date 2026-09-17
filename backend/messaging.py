@@ -1,6 +1,6 @@
 """Channel adapters plus normalized inbound-message persistence."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 import logging
 
@@ -19,6 +19,106 @@ def _oid(value: str) -> Optional[ObjectId]:
         return ObjectId(value)
     except Exception:
         return None
+
+
+NOTIFICATION_DEFAULTS = {
+    "channels": {"inapp": True, "email": True, "telegram": False},
+    "digest": "daily",
+    "critical": {
+        "integration_down": True,
+        "webhook_failures": True,
+        "ftd_drop": True,
+        "budget_exceeded": True,
+        "approval_pending": True,
+    },
+    "telegram_chat_id": "",
+}
+DIGEST_OPTIONS = {"off", "hourly", "daily", "weekly"}
+
+
+def merge_notification_settings(saved: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    saved = saved or {}
+    return {
+        "channels": {**NOTIFICATION_DEFAULTS["channels"], **(saved.get("channels") or {})},
+        "digest": saved.get("digest", NOTIFICATION_DEFAULTS["digest"]),
+        "critical": {**NOTIFICATION_DEFAULTS["critical"], **(saved.get("critical") or {})},
+        "telegram_chat_id": saved.get("telegram_chat_id", ""),
+    }
+
+
+async def notify(
+    workspace_id: str,
+    kind: str,
+    title: str,
+    body: str = "",
+    link: Optional[str] = None,
+    dedupe_key: Optional[str] = None,
+    dedupe_minutes: int = 60,
+) -> int:
+    """Entrega uma notificação nos canais ativos do workspace.
+
+    Respeita as preferências de Configurações > Notificações: alerta crítico
+    desligado não é gravado nem enviado. `dedupe_key` impede que o mesmo alerta
+    se repita dentro da janela — um webhook falhando cem vezes vira um aviso.
+    Devolve quantos destinatários receberam no app.
+    """
+    oid = _oid(workspace_id)
+    if not oid:
+        return 0
+    ws = await db.workspaces.find_one({"_id": oid}, {"notification_settings": 1})
+    prefs = merge_notification_settings((ws or {}).get("notification_settings"))
+    if kind in prefs["critical"] and not prefs["critical"][kind]:
+        return 0
+
+    now = datetime.now(timezone.utc)
+    if dedupe_key:
+        recent = await db.notifications.find_one({
+            "workspace_id": workspace_id,
+            "dedupe_key": dedupe_key,
+            "created_at": {"$gte": now - timedelta(minutes=dedupe_minutes)},
+        })
+        if recent:
+            return 0
+
+    delivered = 0
+    if prefs["channels"]["inapp"]:
+        users = await db.users.find({"workspace_id": workspace_id}, {"_id": 1}).to_list(500)
+        docs = [{
+            "workspace_id": workspace_id,
+            "user_id": str(u["_id"]),
+            "kind": kind,
+            "title": title,
+            "body": body,
+            "link": link,
+            "dedupe_key": dedupe_key,
+            "read": False,
+            "created_at": now,
+        } for u in users]
+        if docs:
+            await db.notifications.insert_many(docs)
+            delivered = len(docs)
+
+    # E-mail: a plataforma ainda não tem provedor de envio configurado. O
+    # canal fica salvo na preferência, mas nada sai por ele — sem fingir.
+    chat_id = prefs["telegram_chat_id"]
+    if prefs["channels"]["telegram"] and chat_id:
+        integration = await db.integrations.find_one({
+            "workspace_id": workspace_id,
+            "provider": "telegram",
+            "credentials.bot_token": {"$exists": True, "$ne": ""},
+        })
+        token = ((integration or {}).get("credentials") or {}).get("bot_token")
+        if token:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    response = await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={"chat_id": chat_id, "text": f"{title}\n{body}".strip()},
+                    )
+                    response.raise_for_status()
+            except Exception as exc:  # noqa: BLE001 — alerta não pode derrubar quem alerta
+                logger.warning("notify telegram falhou workspace=%s: %s", workspace_id, exc)
+    return delivered
 
 
 async def send_channel_message(conversation: Dict[str, Any], content: str) -> Dict[str, Any]:
@@ -239,3 +339,63 @@ async def ingest_incoming_message(
         "channel": provider,
     })
     return {"status": "accepted", "conversation_id": conversation_id, "message_id": message_id}
+
+
+FTD_DROP_MIN_DAILY_AVG = 5    # abaixo disso a média é ruído, não sinal
+FTD_DROP_RATIO = 0.5          # últimas 24h abaixo de metade da média diária
+
+
+def ftd_dropped(last_day: int, previous_week: int) -> bool:
+    """Últimas 24h abaixo da metade da média diária da semana anterior."""
+    daily_avg = previous_week / 7
+    return daily_avg >= FTD_DROP_MIN_DAILY_AVG and last_day < daily_avg * FTD_DROP_RATIO
+
+
+async def run_monitors() -> None:
+    """Alertas que não nascem de uma requisição: orçamento e queda de FTD."""
+    now = datetime.now(timezone.utc)
+    async for ws in db.workspaces.find({}, {"_id": 1}):
+        ws_id = str(ws["_id"])
+
+        async for camp in db.campaigns.find({
+            "workspace_id": ws_id,
+            "budget": {"$gt": 0},
+            "$expr": {"$gt": ["$metrics.spend", "$budget"]},
+        }):
+            await notify(
+                ws_id, "budget_exceeded",
+                f"Orçamento estourado: {camp.get('name')}",
+                f"Investido {camp['metrics']['spend']:.2f} de {camp['budget']:.2f}.",
+                link=f"/media/{camp['_id']}",
+                dedupe_key=f"budget_exceeded:{camp['_id']}",
+                dedupe_minutes=24 * 60,
+            )
+
+        last_day = await db.events.count_documents({
+            "workspace_id": ws_id, "type": "ftd",
+            "created_at": {"$gte": now - timedelta(days=1)},
+        })
+        previous_week = await db.events.count_documents({
+            "workspace_id": ws_id, "type": "ftd",
+            "created_at": {"$gte": now - timedelta(days=8), "$lt": now - timedelta(days=1)},
+        })
+        if ftd_dropped(last_day, previous_week):
+            daily_avg = previous_week / 7
+            await notify(
+                ws_id, "ftd_drop",
+                "Queda brusca de FTDs",
+                f"{last_day} FTDs nas últimas 24h contra média de {daily_avg:.1f}/dia na semana anterior.",
+                link="/analytics",
+                dedupe_key="ftd_drop",
+                dedupe_minutes=24 * 60,
+            )
+
+
+async def monitor_loop(interval_seconds: int = 900) -> None:
+    import asyncio
+    while True:
+        try:
+            await run_monitors()
+        except Exception as exc:  # noqa: BLE001 — o laço não pode morrer por um workspace
+            logger.error("monitor falhou: %s", exc)
+        await asyncio.sleep(interval_seconds)

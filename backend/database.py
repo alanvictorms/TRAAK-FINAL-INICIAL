@@ -1,7 +1,11 @@
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 
-client = AsyncIOMotorClient(os.environ['MONGO_URL'])
+# tz_aware: sem isso o Mongo devolve datas sem fuso. A API as serializava sem
+# 'Z' (o navegador lia como hora local, 3h errado) e toda comparação com
+# datetime.now(timezone.utc) lançava TypeError — bloqueio de login e reset
+# de senha respondiam 500.
+client = AsyncIOMotorClient(os.environ['MONGO_URL'], tz_aware=True)
 db = client[os.environ['DB_NAME']]
 
 
