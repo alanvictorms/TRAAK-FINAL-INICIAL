@@ -368,7 +368,7 @@ function BrainPanel() {
       </div>
       <p className="text-[10px] text-muted-foreground">O agente lê isto antes de responder: volume de leads, fontes, assuntos, etiquetas e o que você ensinar aqui.</p>
       <div className="brain-canvas">
-        <iframe src="/brain.html" title="Cérebro da workspace" loading="lazy" />
+        <iframe src="/brain/" title="Cérebro da workspace" loading="lazy" />
         <div className="brain-overlay">
           <strong>{brain.players}</strong><span>leads na memória</span>
         </div>
