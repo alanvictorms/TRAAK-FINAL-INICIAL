@@ -22,7 +22,8 @@ import ReportsPage from '@/pages/ReportsPage';
 import GovernancePage from '@/pages/GovernancePage';
 import MonitoringPage from '@/pages/MonitoringPage';
 import IdentityPage from '@/pages/IdentityPage';
-import GenericPage from '@/pages/GenericPage';
+import SourcesPage from '@/pages/SourcesPage';
+import RoadmapPage from '@/pages/RoadmapPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -53,7 +54,7 @@ function AppRoutes() {
         <Route path="domains" element={<DomainsPage />} />
         <Route path="domains/:id" element={<DomainsPage />} />
         <Route path="tracking" element={<TrackingPage />} />
-        <Route path="tracking/sources" element={<GenericPage title="Fontes de tráfego" module="sources" />} />
+        <Route path="tracking/sources" element={<SourcesPage />} />
         <Route path="tracking/:id" element={<TrackingPage />} />
         <Route path="ledger" element={<LedgerPage />} />
         <Route path="ledger/:id" element={<LedgerPage />} />
@@ -77,14 +78,14 @@ function AppRoutes() {
         <Route path="settings/general" element={<SettingsPage />} />
         <Route path="settings/team" element={<SettingsPage />} />
         <Route path="settings/api" element={<SettingsPage />} />
-        <Route path="settings/billing" element={<GenericPage title="Faturamento" module="billing" />} />
-        <Route path="settings/notifications" element={<GenericPage title="Notificações" module="notifications" />} />
+        <Route path="settings/billing" element={<SettingsPage />} />
+        <Route path="settings/notifications" element={<SettingsPage />} />
         <Route path="settings/audit" element={<SettingsPage />} />
         <Route path="platform" element={<PlatformPage />} />
         <Route path="platform/tenants" element={<PlatformPage />} />
         <Route path="platform/plans" element={<PlatformPage />} />
         <Route path="platform/ai" element={<PlatformPage />} />
-        <Route path="roadmap" element={<GenericPage title="Roadmap" module="roadmap" />} />
+        <Route path="roadmap" element={<RoadmapPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/command" replace />} />
     </Routes>

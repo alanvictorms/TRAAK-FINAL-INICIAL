@@ -25,6 +25,7 @@ const navGroups = [
       { to: '/integrations', icon: Radar, label: 'Integrações' },
       { to: '/domains', icon: Globe, label: 'Domínios' },
       { to: '/tracking', icon: Link2, label: 'Links' },
+      { to: '/tracking/sources', icon: Radar, label: 'Fontes' },
     ]
   },
   {
@@ -58,6 +59,8 @@ const settingsItems = [
   { to: '/settings/general', icon: Settings, label: 'Operação' },
   { to: '/settings/team', icon: UsersRound, label: 'Equipe' },
   { to: '/settings/api', icon: Key, label: 'API' },
+  { to: '/settings/billing', icon: Receipt, label: 'Faturamento' },
+  { to: '/settings/notifications', icon: Bell, label: 'Notificações' },
   { to: '/settings/audit', icon: ClipboardList, label: 'Auditoria' },
 ];
 
@@ -72,7 +75,12 @@ function SidebarNav({ onNavigate }) {
   const { user } = useAuth();
   const location = useLocation();
 
-  const isActive = (to) => location.pathname === to || location.pathname.startsWith(to + '/');
+  const allTargets = [...navGroups.flatMap(g => g.items), ...settingsItems, ...platformItems].map(i => i.to);
+  // Ativo = o item de rota mais específica que casa com a URL.
+  const best = allTargets
+    .filter(to => location.pathname === to || location.pathname.startsWith(to + '/'))
+    .sort((a, b) => b.length - a.length)[0];
+  const isActive = (to) => to === best;
 
   return (
     <>
@@ -149,7 +157,9 @@ export default function Shell() {
 
   // Get current page title
   const allItems = [...navGroups.flatMap(g => g.items), ...settingsItems, ...platformItems];
-  const current = allItems.find(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'));
+  const current = allItems
+    .filter(i => location.pathname === i.to || location.pathname.startsWith(i.to + '/'))
+    .sort((a, b) => b.to.length - a.to.length)[0];
 
   return (
     <div className="app-frame">
@@ -236,6 +246,7 @@ export default function Shell() {
                 <DropdownMenuItem className="text-xs text-muted-foreground">{user?.email}</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild><NavLink to="/settings/general" className="text-xs">Configurações</NavLink></DropdownMenuItem>
+                <DropdownMenuItem asChild><NavLink to="/roadmap" className="text-xs">Roadmap</NavLink></DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} className="text-xs text-destructive" data-testid="logout-btn">
                   <LogOut size={14} className="mr-2" /> Sair

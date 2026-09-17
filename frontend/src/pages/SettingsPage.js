@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,11 +10,16 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Settings, UsersRound, Key, ClipboardList, Plus, Trash2 } from 'lucide-react';
+import { Settings, UsersRound, Key, ClipboardList, Plus, Trash2, CreditCard, Bell } from 'lucide-react';
+import BillingPanel from '@/components/settings/BillingPanel';
+import NotificationsPanel from '@/components/settings/NotificationsPanel';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
-  const [tab, setTab] = useState('general');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const tab = location.pathname.split('/')[2] || 'general';
+  const setTab = (value) => navigate(`/settings/${value}`);
   const [ws, setWs] = useState(null);
   const [team, setTeam] = useState({ members: [], invites: [] });
   const [apiKeys, setApiKeys] = useState([]);
@@ -23,7 +29,7 @@ export default function SettingsPage() {
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'member' });
   const [keyForm, setKeyForm] = useState({ name: '' });
   const [newKey, setNewKey] = useState(null);
-  const [wsForm, setWsForm] = useState({ name: '', timezone: '', currency: '' });
+  const [wsForm, setWsForm] = useState({ name: '', timezone: '', currency: '', modules: {} });
 
   useEffect(() => {
     loadSettings();
@@ -34,7 +40,7 @@ export default function SettingsPage() {
       if (tab === 'general') {
         const { data } = await api.get('/settings/general');
         setWs(data);
-        setWsForm({ name: data.name || '', timezone: data.timezone || '', currency: data.currency || '' });
+        setWsForm({ name: data.name || '', timezone: data.timezone || '', currency: data.currency || '', modules: data.modules || {} });
       } else if (tab === 'team') {
         const { data } = await api.get('/settings/team');
         setTeam(data);
@@ -102,7 +108,7 @@ export default function SettingsPage() {
       <div className="page-header">
         <div>
           <h1>Configurações<span className="accent">.</span></h1>
-          <p className="page-description">Gerencie sua operação, equipe, chaves e auditoria.</p>
+          <p className="page-description">Operação, equipe, chaves, faturamento, notificações e auditoria.</p>
         </div>
       </div>
 
@@ -111,6 +117,8 @@ export default function SettingsPage() {
           <TabsTrigger value="general" className="text-xs gap-1.5"><Settings size={12} /> Operação</TabsTrigger>
           <TabsTrigger value="team" className="text-xs gap-1.5"><UsersRound size={12} /> Equipe</TabsTrigger>
           <TabsTrigger value="api" className="text-xs gap-1.5"><Key size={12} /> API</TabsTrigger>
+          <TabsTrigger value="billing" className="text-xs gap-1.5"><CreditCard size={12} /> Faturamento</TabsTrigger>
+          <TabsTrigger value="notifications" className="text-xs gap-1.5"><Bell size={12} /> Notificações</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs gap-1.5"><ClipboardList size={12} /> Auditoria</TabsTrigger>
         </TabsList>
 
@@ -140,10 +148,11 @@ export default function SettingsPage() {
                 <div>
                   <Label className="text-xs mb-2 block">Módulos ativos</Label>
                   <div className="space-y-2">
-                    {Object.entries(ws.modules).map(([key, val]) => (
+                    {Object.entries(wsForm.modules).map(([key, val]) => (
                       <div key={key} className="flex items-center justify-between">
                         <span className="text-xs capitalize">{key}</span>
-                        <Switch checked={val} disabled className="scale-75" />
+                        <Switch checked={val} className="scale-75" data-testid={`module-${key}`}
+                          onCheckedChange={v => setWsForm(f => ({ ...f, modules: { ...f.modules, [key]: v } }))} />
                       </div>
                     ))}
                   </div>
@@ -222,6 +231,9 @@ export default function SettingsPage() {
             </Table>
           </div>
         </TabsContent>
+
+        <TabsContent value="billing" className="mt-4">{tab === 'billing' && <BillingPanel />}</TabsContent>
+        <TabsContent value="notifications" className="mt-4">{tab === 'notifications' && <NotificationsPanel />}</TabsContent>
 
         <TabsContent value="audit" className="mt-4">
           <div className="stat-card" style={{ overflow: 'auto' }}>

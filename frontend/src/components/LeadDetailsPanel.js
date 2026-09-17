@@ -10,8 +10,9 @@ import {
   Mail, MapPin, Phone, Plus, Tags, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { money as fmtMoney } from '@/lib/utils';
 
-const money = value => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const money = value => fmtMoney(value || 0);
 const initials = name => (name || 'Lead').split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase();
 
 export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, onClose }) {

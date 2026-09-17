@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request, Query
 from datetime import datetime, timezone
 from bson import ObjectId
-from database import db
+from database import db, audit as _audit
 from auth import get_current_user
 from models import IntegrationCreate, IntegrationUpdate, DomainCreate, DomainUpdate, TrackingLinkCreate
 from telegram_service import public_api_base, register_telegram_webhook
@@ -230,23 +230,84 @@ async def list_tracking_links(request: Request, search: str = None, status: str 
     return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1}
 
 
+# Aliases que chegam em utm_source / campaign.platform / event.source.
+SOURCE_ALIASES = {
+    "facebook": "meta", "fb": "meta", "instagram": "meta", "ig": "meta", "meta": "meta",
+    "tiktok": "tiktok", "tt": "tiktok",
+    "google": "google", "adwords": "google", "gads": "google", "youtube": "google",
+    "kwai": "kwai",
+}
+
+# Parâmetros dinâmicos oficiais de cada plataforma. Kwai fica sem template:
+# não publicamos macro que não conseguimos confirmar.
+SOURCE_MACROS = {
+    "meta": "utm_source=meta&utm_medium=paid&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}",
+    "tiktok": "utm_source=tiktok&utm_medium=paid&utm_campaign=__CAMPAIGN_NAME__&utm_content=__CID_NAME__&utm_term=__AID_NAME__",
+    "google": "utm_source=google&utm_medium=paid&utm_campaign={campaignid}&utm_content={creative}&utm_term={keyword}",
+}
+
+
+def normalize_source(value):
+    key = (value or "").strip().lower()
+    if not key:
+        return "direct"
+    return SOURCE_ALIASES.get(key, key)
+
+
 @router.get("/tracking/sources")
 async def list_sources(request: Request):
+    """Uma linha por fonte: links, cliques e FTDs do ledger, investimento das campanhas."""
     user = await get_current_user(request)
-    pipeline = [
-        {"$match": {"workspace_id": user["workspace_id"]}},
+    ws_id = user["workspace_id"]
+    rows = {}
+
+    def row(src):
+        return rows.setdefault(src, {
+            "source": src, "macro": SOURCE_MACROS.get(src), "links": 0,
+            "clicks": 0, "ftds": 0, "ftd_value": 0.0, "spend": 0.0,
+        })
+
+    links = await db.tracking_links.aggregate([
+        {"$match": {"workspace_id": ws_id}},
+        {"$group": {"_id": "$utm_source", "links": {"$sum": 1}}},
+    ]).to_list(500)
+    for item in links:
+        row(normalize_source(item["_id"]))["links"] += item["links"]
+
+    # O ledger é a fonte da verdade para cliques e FTDs.
+    events = await db.events.aggregate([
+        {"$match": {"workspace_id": ws_id, "type": {"$in": ["click", "ftd"]}}},
         {"$group": {
-            "_id": "$utm_source",
-            "links": {"$sum": 1},
-            "clicks": {"$sum": "$clicks"},
-            "ftds": {"$sum": "$ftds"},
+            "_id": {"source": "$source", "type": "$type"},
+            "count": {"$sum": 1},
+            "value": {"$sum": {"$ifNull": ["$value", 0]}},
         }},
-        {"$sort": {"clicks": -1}},
-    ]
-    items = await db.tracking_links.aggregate(pipeline).to_list(100)
-    for item in items:
-        item["source"] = item.pop("_id") or "direct"
-    return {"items": items}
+    ]).to_list(1000)
+    for item in events:
+        r = row(normalize_source(item["_id"].get("source")))
+        if item["_id"]["type"] == "click":
+            r["clicks"] += item["count"]
+        else:
+            r["ftds"] += item["count"]
+            r["ftd_value"] += item["value"]
+
+    spend = await db.campaigns.aggregate([
+        {"$match": {"workspace_id": ws_id}},
+        {"$group": {"_id": "$platform", "spend": {"$sum": {"$ifNull": ["$metrics.spend", 0]}}}},
+    ]).to_list(100)
+    for item in spend:
+        row(normalize_source(item["_id"]))["spend"] += item["spend"]
+
+    items = []
+    for r in rows.values():
+        # Sem FTD não existe CPFTD: None, nunca 0.
+        r["cpftd"] = round(r["spend"] / r["ftds"], 2) if r["ftds"] else None
+        items.append(r)
+    items.sort(key=lambda r: (r["spend"], r["clicks"]), reverse=True)
+
+    totals = {k: sum(r[k] for r in items) for k in ("links", "clicks", "ftds", "spend")}
+    totals["cpftd"] = round(totals["spend"] / totals["ftds"], 2) if totals["ftds"] else None
+    return {"items": items, "totals": totals}
 
 
 @router.get("/tracking/{link_id}")
@@ -302,13 +363,3 @@ async def delete_tracking_link(link_id: str, request: Request):
     return {"detail": "Removido"}
 
 
-async def _audit(user, action, object_id, object_type):
-    await db.audit_log.insert_one({
-        "workspace_id": user.get("workspace_id"),
-        "user_id": user["_id"],
-        "user_email": user.get("email", ""),
-        "action": action,
-        "object_id": object_id,
-        "object_type": object_type,
-        "timestamp": datetime.now(timezone.utc),
-    })

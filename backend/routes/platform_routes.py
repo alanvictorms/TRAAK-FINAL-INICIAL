@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, Request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from bson import ObjectId
-from database import db
+from database import db, audit
 from auth import get_current_user, require_admin
 from models import (
     AIProviderCreate, AIProviderUpdate, TenantCreate, PlanCreate,
     TeamMemberInvite, APIKeyCreate, WorkspaceSettingsUpdate,
 )
 import math
+import re
 import secrets
 
 router = APIRouter(prefix="/api", tags=["platform"])
@@ -218,9 +219,7 @@ async def invite_member(body: TeamMemberInvite, request: Request):
         "status": "pending",
         "invited_by": user["_id"],
         "created_at": now,
-        "expires_at": datetime.now(timezone.utc).__class__(
-            now.year, now.month, now.day + 7, tzinfo=timezone.utc
-        ) if now.day <= 24 else now,
+        "expires_at": now + timedelta(days=7),
     }
     result = await db.invites.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
@@ -291,6 +290,131 @@ async def mark_notifications_read(request: Request):
     user = await get_current_user(request)
     await db.notifications.update_many({"user_id": user["_id"], "read": False}, {"$set": {"read": True}})
     return {"detail": "Notificações marcadas como lidas"}
+
+
+# ── Notification settings ──
+NOTIFICATION_DEFAULTS = {
+    "channels": {"inapp": True, "email": True, "telegram": False},
+    "digest": "daily",
+    "critical": {
+        "integration_down": True,
+        "webhook_failures": True,
+        "ftd_drop": True,
+        "budget_exceeded": True,
+        "approval_pending": True,
+    },
+    "telegram_chat_id": "",
+}
+DIGEST_OPTIONS = {"off", "hourly", "daily", "weekly"}
+
+
+def _merge_notification_settings(saved):
+    saved = saved or {}
+    return {
+        "channels": {**NOTIFICATION_DEFAULTS["channels"], **(saved.get("channels") or {})},
+        "digest": saved.get("digest", NOTIFICATION_DEFAULTS["digest"]),
+        "critical": {**NOTIFICATION_DEFAULTS["critical"], **(saved.get("critical") or {})},
+        "telegram_chat_id": saved.get("telegram_chat_id", ""),
+    }
+
+
+async def _load_notification_settings(ws_id):
+    ws = await db.workspaces.find_one({"_id": ObjectId(ws_id)}, {"notification_settings": 1})
+    return _merge_notification_settings((ws or {}).get("notification_settings"))
+
+
+@router.get("/settings/notifications")
+async def get_notification_settings(request: Request):
+    user = await get_current_user(request)
+    return await _load_notification_settings(user["workspace_id"])
+
+
+@router.put("/settings/notifications")
+async def update_notification_settings(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    current = await _load_notification_settings(user["workspace_id"])
+
+    for group in ("channels", "critical"):
+        for key, value in (body.get(group) or {}).items():
+            if key not in NOTIFICATION_DEFAULTS[group]:
+                raise HTTPException(400, f"Opção desconhecida: {group}.{key}")
+            if not isinstance(value, bool):
+                raise HTTPException(400, f"{group}.{key} deve ser verdadeiro ou falso")
+            current[group][key] = value
+    if "digest" in body:
+        if body["digest"] not in DIGEST_OPTIONS:
+            raise HTTPException(400, "Resumo deve ser off, hourly, daily ou weekly")
+        current["digest"] = body["digest"]
+    if "telegram_chat_id" in body:
+        current["telegram_chat_id"] = str(body["telegram_chat_id"] or "").strip()
+    if current["channels"]["telegram"] and not current["telegram_chat_id"]:
+        raise HTTPException(400, "Informe o chat ID do Telegram para ativar esse canal")
+
+    now = datetime.now(timezone.utc)
+    await db.workspaces.update_one(
+        {"_id": ObjectId(user["workspace_id"])},
+        {"$set": {"notification_settings": current, "updated_at": now}},
+    )
+    await audit(user, "notification_settings.update", user["workspace_id"], "workspace")
+    return current
+
+
+# ── Billing ──
+USAGE_METRICS = {
+    "events_month": "Eventos no mês",
+    "players": "Players",
+    "members": "Membros",
+    "integrations": "Integrações",
+    "tracking_links": "Links de tracking",
+}
+
+
+@router.get("/settings/billing")
+async def get_billing(request: Request):
+    user = await get_current_user(request)
+    ws_id = user["workspace_id"]
+    ws = await db.workspaces.find_one({"_id": ObjectId(ws_id)}) or {}
+
+    plan = None
+    plan_ref = ws.get("plan_id") or ws.get("plan")
+    if plan_ref:
+        if ObjectId.is_valid(str(plan_ref)):
+            query = {"_id": ObjectId(str(plan_ref))}
+        else:
+            query = {"name": {"$regex": f"^{re.escape(str(plan_ref))}$", "$options": "i"}}
+        plan = await db.plans.find_one(query)
+        if plan:
+            plan["_id"] = str(plan["_id"])
+
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    used = {
+        "events_month": await db.events.count_documents({"workspace_id": ws_id, "created_at": {"$gte": month_start}}),
+        "players": await db.players.count_documents({"workspace_id": ws_id}),
+        "members": await db.users.count_documents({"workspace_id": ws_id}),
+        "integrations": await db.integrations.count_documents({"workspace_id": ws_id}),
+        "tracking_links": await db.tracking_links.count_documents({"workspace_id": ws_id}),
+    }
+    limits = (plan or {}).get("limits") or {}
+    # Limite ausente no plano = None; a tela escreve "sem limite", não 0.
+    usage = [
+        {"key": key, "label": label, "used": used[key], "limit": limits.get(key)}
+        for key, label in USAGE_METRICS.items()
+    ]
+
+    invoices = await db.invoices.find({"workspace_id": ws_id}).sort("issued_at", -1).to_list(24)
+    for inv in invoices:
+        inv["_id"] = str(inv["_id"])
+
+    return {
+        "plan": plan,
+        "plan_label": (plan or {}).get("name") or ws.get("plan"),
+        "period_start": month_start,
+        "usage": usage,
+        "invoices": invoices,
+        "currency": ws.get("currency", "BRL"),
+    }
 
 
 # ── Audit Log ──
