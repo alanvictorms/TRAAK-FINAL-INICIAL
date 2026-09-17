@@ -58,7 +58,7 @@ export default function LoginPage() {
           <h1>Conecte cada clique ao seu <span className="accent">resultado.</span></h1>
           <p>Tracking, identidade, atendimento e prova financeira em uma única plataforma de iGaming.</p>
         </div>
-        <div style={{ marginTop: 'auto', fontSize: '9px', color: 'hsl(155 15% 40%)' }}>
+        <div style={{ marginTop: 'auto', fontSize: '9px', color: 'hsl(40 6% 45%)' }}>
           © 2026 TrakAquire
         </div>
       </aside>
@@ -71,7 +71,7 @@ export default function LoginPage() {
               onClick={() => { setMode(key); setError(''); setMessage(''); }}
               style={{
                 padding: '8px 14px', borderRadius: '6px', fontSize: '11px', border: 'none', cursor: 'pointer',
-                background: mode === key ? 'hsl(148 25% 22%)' : 'transparent',
+                background: mode === key ? 'rgba(246,241,231,.1)' : 'transparent',
                 color: mode === key ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))',
               }}
               data-testid={`auth-tab-${key}`}
@@ -111,7 +111,7 @@ export default function LoginPage() {
             )}
 
             {error && <p className="auth-error" data-testid="auth-error">{error}</p>}
-            {message && <p style={{ fontSize: '11px', color: 'hsl(89 66% 72%)' }} data-testid="auth-message">{message}</p>}
+            {message && <p style={{ fontSize: '11px', color: '#F6F1E7' }} data-testid="auth-message">{message}</p>}
 
             <Button type="submit" className="auth-submit" disabled={loading} data-testid="auth-submit-btn">
               {loading ? 'Processando...' : mode === 'login' ? 'Entrar' : mode === 'register' ? 'Criar conta' : 'Enviar recuperação'}
