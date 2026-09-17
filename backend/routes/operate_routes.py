@@ -2,9 +2,10 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
 from bson import ObjectId
-from database import db
+from database import db, audit
 from auth import get_current_user
-from messaging import send_channel_message
+from messaging import send_channel_message, notify
+from analytics import CLOSE_REASONS
 from realtime import inbox_events
 from models import (
     ConversationCreate, MessageCreate, SegmentCreate,
@@ -12,6 +13,7 @@ from models import (
     LeadDetailUpdate, LeadTaskCreate,
 )
 import math
+import re
 import asyncio
 import json
 
@@ -27,8 +29,8 @@ async def list_conversations(request: Request, status: str = None, search: str =
         query["status"] = status
     if search:
         query["$or"] = [
-            {"subject": {"$regex": search, "$options": "i"}},
-            {"player_name": {"$regex": search, "$options": "i"}},
+            {"subject": {"$regex": re.escape(search), "$options": "i"}},
+            {"player_name": {"$regex": re.escape(search), "$options": "i"}},
         ]
     total = await db.conversations.count_documents(query)
     items = await db.conversations.find(query).sort("updated_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
@@ -300,28 +302,113 @@ async def send_message(conversation_id: str, body: MessageCreate, request: Reque
     return msg
 
 
+async def _body(request: Request) -> dict:
+    """Corpo JSON opcional: chamadas antigas não mandam nada."""
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+async def _conversation_or_404(conversation_id, ws_id):
+    if not ObjectId.is_valid(conversation_id):
+        raise HTTPException(404, "Conversa não encontrada")
+    conv = await db.conversations.find_one({"_id": ObjectId(conversation_id), "workspace_id": ws_id})
+    if not conv:
+        raise HTTPException(404, "Conversa não encontrada")
+    return conv
+
+
+@router.get("/inbox/meta/options")
+async def inbox_options(request: Request):
+    """Atendentes para transferência e motivos de encerramento."""
+    user = await get_current_user(request)
+    members = await db.users.find({"workspace_id": user["workspace_id"]}, {"name": 1, "email": 1, "role": 1}).to_list(200)
+    return {
+        "agents": [{"id": str(m["_id"]), "name": m.get("name") or m.get("email"), "role": m.get("role")} for m in members],
+        "close_reasons": [{"key": k, "label": v} for k, v in CLOSE_REASONS.items()],
+    }
+
+
 @router.post("/inbox/{conversation_id}/assign")
 async def assign_conversation(conversation_id: str, request: Request):
+    """Sem corpo: assume a conversa. Com {user_id}: transfere para outro atendente."""
     user = await get_current_user(request)
-    result = await db.conversations.update_one(
-        {"_id": ObjectId(conversation_id), "workspace_id": user["workspace_id"]},
-        {"$set": {"assigned_to": user["_id"], "assigned_name": user.get("name", ""), "status": "active", "updated_at": datetime.now(timezone.utc)}},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(404, "Conversa não encontrada")
-    return {"detail": "Conversa assumida"}
+    conv = await _conversation_or_404(conversation_id, user["workspace_id"])
+    body = await _body(request)
+    target_id = body.get("user_id") or user["_id"]
+    if target_id == user["_id"]:
+        target = user
+    else:
+        if not ObjectId.is_valid(str(target_id)):
+            raise HTTPException(400, "Atendente inválido")
+        target = await db.users.find_one({"_id": ObjectId(target_id), "workspace_id": user["workspace_id"]})
+        if not target:
+            raise HTTPException(400, "Atendente não pertence a este workspace")
+        target["_id"] = str(target["_id"])
+    now = datetime.now(timezone.utc)
+    await db.conversations.update_one({"_id": conv["_id"]}, {"$set": {
+        "assigned_to": target["_id"], "assigned_name": target.get("name", ""),
+        "status": "active", "updated_at": now,
+    }})
+    transferred = target["_id"] != user["_id"]
+    if transferred:
+        note = (body.get("note") or "").strip()
+        await db.messages.insert_one({
+            "conversation_id": conversation_id, "workspace_id": user["workspace_id"],
+            "sender_id": user["_id"], "sender_name": user.get("name", ""),
+            "content": f"Transferida para {target.get('name') or target.get('email')}" + (f": {note}" if note else ""),
+            "type": "system", "direction": "internal", "created_at": now,
+        })
+        await notify(
+            user["workspace_id"], "conversation_transfer",
+            "Conversa transferida para você",
+            f"{user.get('name') or user.get('email')} passou {conv.get('player_name') or 'uma conversa'} para você.",
+            link=f"/inbox/{conversation_id}", user_ids=[target["_id"]],
+        )
+        await inbox_events.publish(user["workspace_id"], {"type": "conversation.assigned", "conversation_id": conversation_id})
+    await audit(user, "inbox.transfer" if transferred else "inbox.assign", conversation_id, "conversation")
+    return {"detail": "Conversa transferida" if transferred else "Conversa assumida",
+            "assigned_to": target["_id"], "assigned_name": target.get("name", "")}
 
 
 @router.post("/inbox/{conversation_id}/close")
 async def close_conversation(conversation_id: str, request: Request):
     user = await get_current_user(request)
-    result = await db.conversations.update_one(
-        {"_id": ObjectId(conversation_id), "workspace_id": user["workspace_id"]},
-        {"$set": {"status": "resolved", "closed_at": datetime.now(timezone.utc), "updated_at": datetime.now(timezone.utc)}},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(404, "Conversa não encontrada")
+    conv = await _conversation_or_404(conversation_id, user["workspace_id"])
+    body = await _body(request)
+    reason = body.get("reason")
+    if reason is not None and reason not in CLOSE_REASONS:
+        raise HTTPException(400, "Motivo de encerramento inválido")
+    now = datetime.now(timezone.utc)
+    await db.conversations.update_one({"_id": conv["_id"]}, {"$set": {
+        "status": "resolved", "closed_at": now, "closed_by": user["_id"],
+        "close_reason": reason, "close_note": (body.get("note") or "").strip() or None,
+        "updated_at": now,
+    }})
+    await inbox_events.publish(user["workspace_id"], {"type": "conversation.closed", "conversation_id": conversation_id})
     return {"detail": "Conversa encerrada"}
+
+
+@router.put("/inbox/{conversation_id}/tags")
+async def set_conversation_tags(conversation_id: str, request: Request):
+    user = await get_current_user(request)
+    conv = await _conversation_or_404(conversation_id, user["workspace_id"])
+    body = await _body(request)
+    tags = body.get("tags")
+    if not isinstance(tags, list):
+        raise HTTPException(400, "Envie tags como lista")
+    clean = []
+    for t in tags:
+        t = str(t).strip().lower()[:40]
+        if t and t not in clean:
+            clean.append(t)
+    if len(clean) > 20:
+        raise HTTPException(400, "No máximo 20 etiquetas por conversa")
+    await db.conversations.update_one({"_id": conv["_id"]}, {"$set": {"tags": clean, "updated_at": datetime.now(timezone.utc)}})
+    await inbox_events.publish(user["workspace_id"], {"type": "conversation.updated", "conversation_id": conversation_id})
+    return {"tags": clean}
 
 
 # ── Automations ──
@@ -583,7 +670,7 @@ async def list_campaigns(request: Request, platform: str = None, status: str = N
     if status:
         query["status"] = status
     if search:
-        query["name"] = {"$regex": search, "$options": "i"}
+        query["name"] = {"$regex": re.escape(search), "$options": "i"}
     total = await db.campaigns.count_documents(query)
     items = await db.campaigns.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
     for item in items:

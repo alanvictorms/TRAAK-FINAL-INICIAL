@@ -132,6 +132,15 @@ async def startup():
     await db.notifications.create_index([("user_id", 1), ("created_at", -1)])
     await db.notifications.create_index([("workspace_id", 1), ("dedupe_key", 1), ("created_at", -1)])
     await db.webhook_failures.create_index("at", expireAfterSeconds=7 * 24 * 3600)
+    await db.events.create_index([("workspace_id", 1), ("type", 1), ("created_at", -1)])
+    await db.events.create_index([("workspace_id", 1), ("type", 1), ("external_id", 1)])
+    await db.events.create_index([("metadata.link_id", 1), ("created_at", -1)])
+    await db.players.create_index([("workspace_id", 1), ("external_ids.telegram_user_id", 1)])
+    try:
+        # /api/r/{slug} não carrega workspace: slug é único na plataforma.
+        await db.tracking_links.create_index("slug", unique=True)
+    except Exception as exc:  # noqa: BLE001 — slugs repetidos antigos não derrubam o boot
+        logger.error("Índice único de slug não criado (há slugs repetidos?): %s", exc)
 
     logger.info("TrakAquire API ready")
     await sync_telegram_webhooks()

@@ -5,6 +5,7 @@ from database import db
 from auth import get_current_user
 from models import EventCreate, PlayerCreate, PlayerUpdate
 import math
+import re
 
 router = APIRouter(prefix="/api", tags=["observe"])
 
@@ -20,8 +21,8 @@ async def list_events(request: Request, type: str = None, status: str = None, se
         query["status"] = status
     if search:
         query["$or"] = [
-            {"external_id": {"$regex": search, "$options": "i"}},
-            {"person_id": {"$regex": search, "$options": "i"}},
+            {"external_id": {"$regex": re.escape(search), "$options": "i"}},
+            {"person_id": {"$regex": re.escape(search), "$options": "i"}},
         ]
     total = await db.events.count_documents(query)
     items = await db.events.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
@@ -111,8 +112,8 @@ async def list_players(request: Request, search: str = None, origin: str = None,
     query = {"workspace_id": user["workspace_id"]}
     if search:
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"external_ids": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": re.escape(search), "$options": "i"}},
+            {"external_ids": {"$regex": re.escape(search), "$options": "i"}},
         ]
     if origin:
         query["origin"] = origin
@@ -207,7 +208,7 @@ async def list_identities(request: Request, search: str = None, page: int = 1, l
     user = await get_current_user(request)
     query = {"workspace_id": user["workspace_id"]}
     if search:
-        query["$or"] = [{"name": {"$regex": search, "$options": "i"}}]
+        query["$or"] = [{"name": {"$regex": re.escape(search), "$options": "i"}}]
     # Identity graph is built from players + their identifiers
     total = await db.players.count_documents(query)
     items = await db.players.find(query, {"name": 1, "external_ids": 1, "origin": 1, "status": 1, "score": 1}).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)

@@ -66,7 +66,8 @@ async def register_telegram_webhook(
                 json={
                     "url": webhook_url,
                     "secret_token": webhook_secret,
-                    "allowed_updates": ["message", "edited_message", "channel_post", "edited_channel_post"],
+                    # chat_member: entradas e saídas do canal (exige o bot como admin do canal).
+                    "allowed_updates": ["message", "edited_message", "channel_post", "edited_channel_post", "chat_member"],
                     "drop_pending_updates": False,
                 },
             )

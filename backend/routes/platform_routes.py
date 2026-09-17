@@ -3,6 +3,11 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from database import db, audit
 from messaging import NOTIFICATION_DEFAULTS, DIGEST_OPTIONS, merge_notification_settings
+from analytics import (
+    CLOSE_REASONS, buckets, funnel_steps, pct_change, ratio, resolve_period,
+    response_minutes, workspace_tz,
+)
+from attribution import normalize_source, source_variants
 from auth import get_current_user, require_admin
 from models import (
     AIProviderCreate, AIProviderUpdate, TenantCreate, PlanCreate,
@@ -460,51 +465,218 @@ async def global_search(request: Request, q: str = "", limit: int = 5):
 
 
 # ── Analytics ──
-@router.get("/analytics")
-async def get_analytics(request: Request, period: str = "30d"):
+KPI_CATALOG = {
+    "clicks": "Cliques",
+    "bot_starts": "StartBots",
+    "channel_joins": "Entradas no canal",
+    "registrations": "Cadastros",
+    "ftds": "FTDs",
+    "ftd_value": "Valor em FTD",
+    "deposits_value": "Depósitos",
+    "net_deposits": "Depósito líquido",
+    "click_to_ftd": "Clique → FTD (%)",
+    "avg_ftd": "Ticket médio do FTD",
+}
+DEFAULT_KPIS = ["clicks", "registrations", "ftds", "deposits_value"]
+COUNT_KEYS = {"click": "clicks", "bot_start": "bot_starts", "channel_join": "channel_joins",
+              "register": "registrations", "ftd": "ftds"}
+
+
+def _event_match(ws_id, start, end, source):
+    match = {"workspace_id": ws_id, "created_at": {"$gte": start, "$lt": end}}
+    if source:
+        match["source"] = {"$in": source_variants(normalize_source(source))}
+    return match
+
+
+def _totals(rows):
+    """rows: [{_id: type, count, value}] → KPIs do catálogo."""
+    by_type = {r["_id"]: r for r in rows}
+    out = {COUNT_KEYS[t]: by_type.get(t, {}).get("count", 0) for t in COUNT_KEYS}
+    ftd_value = by_type.get("ftd", {}).get("value", 0) or 0
+    deposits = (by_type.get("deposit", {}).get("value", 0) or 0) + ftd_value
+    withdrawals = by_type.get("withdrawal", {}).get("value", 0) or 0
+    out.update({
+        "ftd_value": ftd_value,
+        "deposits_value": deposits,
+        "net_deposits": deposits - withdrawals,
+        "click_to_ftd": ratio(out["ftds"], out["clicks"], pct=True),
+        "avg_ftd": ratio(ftd_value, out["ftds"]),
+    })
+    return out
+
+
+async def _window(ws_id, start, end, source):
+    rows = await db.events.aggregate([
+        {"$match": _event_match(ws_id, start, end, source)},
+        {"$group": {"_id": "$type", "count": {"$sum": 1}, "value": {"$sum": {"$ifNull": ["$value", 0]}}}},
+    ]).to_list(50)
+    return _totals(rows)
+
+
+async def _series(ws_id, start, end, source, granularity, tz):
+    unit = {"$dateTrunc": {"date": "$created_at", "unit": granularity, "timezone": tz.key if hasattr(tz, "key") else "UTC"}}
+    if granularity == "week":
+        unit["$dateTrunc"]["startOfWeek"] = "monday"
+    rows = await db.events.aggregate([
+        {"$match": _event_match(ws_id, start, end, source)},
+        {"$group": {"_id": {"t": unit, "type": "$type"}, "count": {"$sum": 1},
+                    "value": {"$sum": {"$ifNull": ["$value", 0]}}}},
+    ]).to_list(5000)
+    grouped = {}
+    for r in rows:
+        grouped.setdefault(r["_id"]["t"], []).append({"_id": r["_id"]["type"], "count": r["count"], "value": r["value"]})
+    points = []
+    for b in buckets(start, end, granularity, tz):
+        totals = _totals(grouped.get(b, []))
+        points.append({"t": b, **{k: totals[k] for k in ("clicks", "bot_starts", "channel_joins", "registrations", "ftds", "deposits_value")}})
+    return points
+
+
+@router.get("/analytics/overview")
+async def analytics_overview(request: Request, period: str = "30d", granularity: str = "day", source: str = None):
     user = await get_current_user(request)
     ws_id = user["workspace_id"]
-    pipeline = [
+    ws = await db.workspaces.find_one({"_id": ObjectId(ws_id)}, {"timezone": 1, "currency": 1}) or {}
+    tz = workspace_tz(ws.get("timezone"))
+    try:
+        prev_start, start, end = resolve_period(period)
+        series = await _series(ws_id, start, end, source, granularity, tz)
+        previous_series = await _series(ws_id, prev_start, start, source, granularity, tz)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    current = await _window(ws_id, start, end, source)
+    previous = await _window(ws_id, prev_start, start, source)
+    kpis = [{
+        "key": key, "label": label, "value": current[key], "previous": previous[key],
+        "change": pct_change(current[key], previous[key]),
+    } for key, label in KPI_CATALOG.items()]
+
+    # Série anterior alinhada por posição (o 3º dia de agora com o 3º de antes).
+    for i, point in enumerate(series):
+        prev = previous_series[i] if i < len(previous_series) else {}
+        point["previous"] = {k: prev.get(k, 0) for k in ("clicks", "registrations", "ftds", "deposits_value")}
+
+    by_source_rows = await db.events.aggregate([
+        {"$match": _event_match(ws_id, start, end, source)},
+        {"$group": {"_id": {"source": "$source", "type": "$type"}, "count": {"$sum": 1},
+                    "value": {"$sum": {"$ifNull": ["$value", 0]}}}},
+    ]).to_list(1000)
+    per_source = {}
+    for r in by_source_rows:
+        key = normalize_source(r["_id"].get("source"))
+        per_source.setdefault(key, []).append({"_id": r["_id"]["type"], "count": r["count"], "value": r["value"]})
+    by_source = []
+    for key, rows in per_source.items():
+        # Mesmo tipo pode vir de aliases diferentes (facebook, meta): soma antes.
+        merged = {}
+        for row in rows:
+            m = merged.setdefault(row["_id"], {"_id": row["_id"], "count": 0, "value": 0})
+            m["count"] += row["count"]
+            m["value"] += row["value"]
+        by_source.append({"source": key, **_totals(list(merged.values()))})
+    by_source.sort(key=lambda r: (r["ftds"], r["clicks"]), reverse=True)
+
+    # Gasto de campanha não tem data por dia no modelo atual: é total acumulado.
+    spend = await db.campaigns.aggregate([
         {"$match": {"workspace_id": ws_id}},
-        {"$group": {
-            "_id": {"type": "$type", "source": "$source"},
-            "count": {"$sum": 1},
-            "total_value": {"$sum": {"$ifNull": ["$value", 0]}},
-        }},
-    ]
-    agg = await db.events.aggregate(pipeline).to_list(100)
-    by_source = {}
-    for item in agg:
-        src = item["_id"].get("source") or "direct"
-        if src not in by_source:
-            by_source[src] = {"source": src, "clicks": 0, "registrations": 0, "ftds": 0, "deposits": 0, "value": 0}
-        t = item["_id"].get("type")
-        if t == "click":
-            by_source[src]["clicks"] += item["count"]
-        elif t == "register":
-            by_source[src]["registrations"] += item["count"]
-        elif t == "ftd":
-            by_source[src]["ftds"] += item["count"]
-            by_source[src]["value"] += item["total_value"]
-        elif t == "deposit":
-            by_source[src]["deposits"] += item["count"]
-            by_source[src]["value"] += item["total_value"]
-    return {"items": list(by_source.values()), "period": period}
+        {"$group": {"_id": None, "spend": {"$sum": {"$ifNull": ["$metrics.spend", 0]}}}},
+    ]).to_list(1)
+
+    prefs = (await db.users.find_one({"_id": ObjectId(user["_id"])}, {"analytics_kpis": 1}) or {}).get("analytics_kpis")
+    return {
+        "period": period, "granularity": granularity, "source": source,
+        "range": {"start": start, "end": end, "previous_start": prev_start},
+        "timezone": getattr(tz, "key", "UTC"),
+        "currency": ws.get("currency", "BRL"),
+        "kpis": kpis,
+        "selected_kpis": prefs or DEFAULT_KPIS,
+        "series": series,
+        "funnel": funnel_steps(
+            {t: current[k] for t, k in COUNT_KEYS.items()},
+            {t: previous[k] for t, k in COUNT_KEYS.items()},
+        ),
+        "by_source": by_source,
+        "spend_total": spend[0]["spend"] if spend else 0,
+    }
+
+
+@router.put("/analytics/preferences")
+async def save_analytics_preferences(request: Request):
+    user = await get_current_user(request)
+    body = await request.json()
+    kpis = body.get("kpis")
+    if not isinstance(kpis, list) or not 1 <= len(kpis) <= 8 or any(k not in KPI_CATALOG for k in kpis):
+        raise HTTPException(400, "Escolha de 1 a 8 KPIs do catálogo")
+    await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": {"analytics_kpis": kpis}})
+    return {"selected_kpis": kpis}
+
+
+# Compatibilidade: a tabela por origem que a tela antiga lia.
+@router.get("/analytics")
+async def get_analytics(request: Request, period: str = "30d"):
+    data = await analytics_overview(request, period=period, granularity="day")
+    return {"items": [{
+        "source": r["source"], "clicks": r["clicks"], "registrations": r["registrations"],
+        "ftds": r["ftds"], "deposits": r["deposits_value"], "value": r["deposits_value"],
+    } for r in data["by_source"]], "period": period}
+
+
+ATTENDANCE_SCAN_LIMIT = 5000
 
 
 @router.get("/analytics/atendimento")
-async def get_atendimento_analytics(request: Request):
+async def get_atendimento_analytics(request: Request, period: str = "30d"):
     user = await get_current_user(request)
     ws_id = user["workspace_id"]
-    pipeline = [
-        {"$match": {"workspace_id": ws_id}},
-        {"$group": {
-            "_id": "$assigned_to",
-            "conversations": {"$sum": 1},
-            "resolved": {"$sum": {"$cond": [{"$eq": ["$status", "resolved"]}, 1, 0]}},
-        }},
-    ]
-    agg = await db.conversations.aggregate(pipeline).to_list(50)
-    total_queue = await db.conversations.count_documents({"workspace_id": ws_id, "status": "queue"})
-    total_active = await db.conversations.count_documents({"workspace_id": ws_id, "status": "active"})
-    return {"by_agent": agg, "queue": total_queue, "active": total_active}
+    try:
+        _, start, end = resolve_period(period)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    # ponytail: agrega em Python; acima de ATTENDANCE_SCAN_LIMIT conversas no
+    # período, trocar por $group com $dateDiff no banco.
+    convs = await db.conversations.find(
+        {"workspace_id": ws_id, "created_at": {"$gte": start, "$lt": end}},
+        {"assigned_to": 1, "assigned_name": 1, "status": 1, "created_at": 1,
+         "first_response_at": 1, "close_reason": 1, "tags": 1},
+    ).to_list(ATTENDANCE_SCAN_LIMIT)
+
+    agents, reasons, tags = {}, {}, {}
+    for c in convs:
+        key = c.get("assigned_to") or "_unassigned"
+        a = agents.setdefault(key, {
+            "agent_id": c.get("assigned_to"), "name": c.get("assigned_name") or "Sem atendente",
+            "conversations": 0, "resolved": 0, "pairs": [],
+        })
+        a["conversations"] += 1
+        if c.get("status") == "resolved":
+            a["resolved"] += 1
+            reason = c.get("close_reason") or "unspecified"
+            reasons[reason] = reasons.get(reason, 0) + 1
+        a["pairs"].append((c.get("created_at"), c.get("first_response_at")))
+        for tag in c.get("tags") or []:
+            tags[tag] = tags.get(tag, 0) + 1
+
+    by_agent = []
+    for a in agents.values():
+        stats = response_minutes(a.pop("pairs"))
+        by_agent.append({**a, "first_response": stats, "resolution_rate": ratio(a["resolved"], a["conversations"], pct=True)})
+    by_agent.sort(key=lambda a: a["conversations"], reverse=True)
+
+    all_pairs = [(c.get("created_at"), c.get("first_response_at")) for c in convs]
+    labels = {**CLOSE_REASONS, "unspecified": "Não informado"}
+    return {
+        "period": period,
+        "queue": await db.conversations.count_documents({"workspace_id": ws_id, "status": "queue"}),
+        "active": await db.conversations.count_documents({"workspace_id": ws_id, "status": "active"}),
+        "total": len(convs),
+        "truncated": len(convs) >= ATTENDANCE_SCAN_LIMIT,
+        "first_response": response_minutes(all_pairs),
+        "by_agent": by_agent,
+        "close_reasons": sorted(
+            [{"key": k, "label": labels.get(k, k), "count": v} for k, v in reasons.items()],
+            key=lambda r: r["count"], reverse=True),
+        "tags": sorted([{"tag": k, "count": v} for k, v in tags.items()], key=lambda r: r["count"], reverse=True)[:30],
+    }

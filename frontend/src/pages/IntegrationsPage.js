@@ -123,6 +123,11 @@ export default function IntegrationsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  // O detalhe vem do servidor: é lá que integrações TAP antigas ganham token de postback.
+  const openDetail = async (item) => {
+    setShowDetail(item);
+    try { const { data } = await api.get(`/integrations/${item._id}`); setShowDetail(data); } catch { /* fica com o da lista */ }
+  };
   const [form, setForm] = useState({ provider: '' });
   const [credFields, setCredFields] = useState({});
 
@@ -285,7 +290,7 @@ export default function IntegrationsPage() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowDetail(item)} data-testid={`config-${item._id}`}><Settings size={13} /></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openDetail(item)} data-testid={`config-${item._id}`}><Settings size={13} /></Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleTest(item._id)} data-testid={`test-${item._id}`}><TestTube size={13} /></Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(item._id)}><Trash2 size={13} /></Button>
                   </div>
@@ -389,10 +394,13 @@ export default function IntegrationsPage() {
                   {showDetail.provider === 'tap' && (
                     <div className="stat-card p-3 mt-3">
                       <p className="text-[10px] font-medium text-foreground mb-1">Postback URL</p>
-                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">
-                        {`${window.location.origin}/api/webhooks/tap`}
+                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all" data-testid="tap-postback-url">
+                        {showDetail.config?.postback_url || 'Gerando…'}
                       </code>
-                      <p className="text-[9px] text-muted-foreground mt-1">Configure esta URL no painel TAP para receber postbacks de registro, FTD, depósito e saque.</p>
+                      {showDetail.config?.postback_url && (
+                        <Button variant="outline" size="sm" className="mt-2 text-xs h-7" onClick={() => { navigator.clipboard.writeText(showDetail.config.postback_url); toast.success('URL copiada'); }}>Copiar</Button>
+                      )}
+                      <p className="text-[9px] text-muted-foreground mt-1">URL exclusiva desta integração — o token nela autentica cada postback. Não compartilhe. Envie POST JSON com event, transaction_id, customer_id, click_id e amount.</p>
                     </div>
                   )}
                   {['telegram', 'meta', 'whatsapp'].includes(showDetail.provider) && (

@@ -6,7 +6,7 @@ os.environ.setdefault("DB_NAME", "traak_test")
 os.environ.setdefault("JWT_SECRET", "test")
 
 from messaging import ftd_dropped  # noqa: E402
-from routes.connect_routes import normalize_source  # noqa: E402
+from attribution import normalize_source  # noqa: E402
 
 
 def test_normalize_source_aliases():

@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from database import db
 from bson import ObjectId
 from messaging import ingest_incoming_message, notify
+from attribution import is_start_command, membership_change, start_param
 import httpx
 import hashlib
 import hmac
@@ -34,11 +35,12 @@ async def _webhook_failed(workspace_id, integration_id, provider, reason):
         )
 
 
-async def _find_workspace_for_tap(api_key: str = None):
-    """Find workspace that has a TAP integration with matching credentials"""
-    query = {"provider": "tap", "status": {"$in": ["configured", "connected", "active"]}}
-    if api_key:
-        query["credentials.api_key"] = api_key
+async def _find_workspace_for_tap(api_key: str):
+    """Integração TAP cuja API Key bate com a enviada. Sem chave, nenhuma."""
+    if not api_key:
+        return None, None
+    query = {"provider": "tap", "status": {"$in": ["configured", "connected", "active"]},
+             "credentials.api_key": api_key}
     integration = await db.integrations.find_one(query)
     if not integration:
         return None, None
@@ -48,13 +50,32 @@ async def _find_workspace_for_tap(api_key: str = None):
 def _verify_signature(payload_bytes: bytes, signature: str, secret: str) -> bool:
     """Verify HMAC-SHA256 signature"""
     if not secret or not signature:
-        return True  # No secret configured = skip validation (log warning)
+        return False
     expected = hmac.new(secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
 
 
 @router.post("/tap")
 async def tap_webhook(request: Request):
+    """Rota legada: só com X-TAP-Key de uma integração existente."""
+    workspace_id, integration = await _find_workspace_for_tap(request.headers.get("X-TAP-Key"))
+    if not workspace_id:
+        raise HTTPException(401, "Use a URL de postback da integração ou envie X-TAP-Key válida")
+    return await _process_tap(request, workspace_id, integration)
+
+
+@router.post("/tap/{integration_id}")
+async def tap_webhook_scoped(integration_id: str, request: Request):
+    """URL de postback própria da integração, autenticada pelo token dela."""
+    integration = await _messaging_integration(integration_id, "tap")
+    supplied = request.query_params.get("token") or request.headers.get("X-TAP-Token") or ""
+    expected = (integration.get("config") or {}).get("postback_token")
+    if not expected or not hmac.compare_digest(expected, supplied):
+        raise HTTPException(401, "Token de postback inválido")
+    return await _process_tap(request, integration["workspace_id"], integration)
+
+
+async def _process_tap(request: Request, workspace_id: str, integration: dict):
     """
     Receive TAP postback events: register, ftd, deposit, withdrawal.
     
@@ -92,13 +113,6 @@ async def tap_webhook(request: Request):
     if not transaction_id:
         raise HTTPException(400, "transaction_id obrigatório")
 
-    # Find workspace by API key or first available TAP integration
-    api_key_header = request.headers.get("X-TAP-Key")
-    workspace_id, integration = await _find_workspace_for_tap(api_key_header)
-
-    if not workspace_id:
-        raise HTTPException(404, "Nenhuma integração TAP configurada")
-
     # Verify signature if webhook_secret is set
     signature = request.headers.get("X-TAP-Signature", "")
     webhook_secret = (integration.get("credentials") or {}).get("webhook_secret", "")
@@ -131,18 +145,33 @@ async def tap_webhook(request: Request):
                 {"external_ids.customer_id": customer_id},
             ],
         })
-    if not player and click_id:
-        # Try to find via tracking click correlation
+    # O clique é buscado sempre: mesmo com o player achado pelo customer_id,
+    # é dele que vem a origem do evento.
+    click_event = None
+    if click_id:
         click_event = await db.events.find_one({
             "workspace_id": workspace_id,
             "type": "click",
             "external_id": click_id,
         })
-        if click_event and click_event.get("person_id"):
-            player = await db.players.find_one({"_id": ObjectId(click_event["person_id"])})
+    if not player and click_event and click_event.get("person_id"):
+        player = await db.players.find_one({"_id": ObjectId(click_event["person_id"])})
 
     if player:
         person_id = str(player["_id"])
+
+    # Origem = canal de mídia que trouxe o lead (clique ou atribuição do
+    # player). "tap" é o provedor do evento, não a fonte de tráfego.
+    attribution = None
+    if click_id and click_event:
+        meta = click_event.get("metadata") or {}
+        attribution = {"click_id": click_id, "link_id": meta.get("link_id"), "source": click_event.get("source"),
+                       "campaign_id": meta.get("campaign_id"), "method": "last_click", "window": "30d"}
+    elif player and player.get("attribution"):
+        attribution = player["attribution"]
+    elif click_id:
+        attribution = {"click_id": click_id, "method": "last_click", "window": "30d",
+                       "note": "click_id sem clique registrado"}
 
     # Create event in Signal Ledger
     event_status = "linked" if person_id else "orphan"
@@ -150,7 +179,7 @@ async def tap_webhook(request: Request):
         "workspace_id": workspace_id,
         "type": event_type,
         "person_id": person_id,
-        "source": "tap",
+        "source": (attribution or {}).get("source"),
         "value": float(amount) if amount else None,
         "currency": currency,
         "external_id": transaction_id,
@@ -163,18 +192,16 @@ async def tap_webhook(request: Request):
         "status": event_status,
         "latency_ms": None,
         "attempts": [{"at": now.isoformat(), "status": "received", "source": "webhook"}],
-        "attribution": {
-            "click_id": click_id,
-            "method": "last_click",
-            "window": "30d",
-            "note": "Referência observada, sujeita a D04",
-        } if click_id else None,
+        "attribution": attribution,
         "fact_at": datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00")) if payload.get("timestamp") else now,
         "received_at": now,
         "created_at": now,
     }
     result = await db.events.insert_one(event_doc)
     event_id = str(result.inserted_id)
+    link_id = (attribution or {}).get("link_id")
+    if event_type == "ftd" and link_id and ObjectId.is_valid(link_id):
+        await db.tracking_links.update_one({"_id": ObjectId(link_id)}, {"$inc": {"ftds": 1}})
 
     # Update player stats if linked
     if person_id and player:
@@ -286,7 +313,7 @@ async def telegram_updates(integration_id: str, request: Request):
     integration = await _messaging_integration(integration_id, "telegram")
     configured_secret = (integration.get("credentials") or {}).get("webhook_secret")
     supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if configured_secret and not hmac.compare_digest(configured_secret, supplied_secret or ""):
+    if not configured_secret or not hmac.compare_digest(configured_secret, supplied_secret or ""):
         raise HTTPException(401, "Webhook secret inválido")
 
     payload = await request.json()
@@ -295,6 +322,9 @@ async def telegram_updates(integration_id: str, request: Request):
         integration_id,
         payload.get("update_id"),
     )
+    if payload.get("chat_member"):
+        return await _record_membership(integration, payload["chat_member"])
+
     message = (
         payload.get("message")
         or payload.get("edited_message")
@@ -323,6 +353,8 @@ async def telegram_updates(integration_id: str, request: Request):
         external_message_id=str(message.get("message_id") or payload.get("update_id")),
         raw_payload=payload,
     )
+    if result.get("status") == "accepted" and payload.get("message") and is_start_command(content):
+        await _record_bot_start(integration, result["player_id"], message, start_param(content))
     logger.info(
         "Telegram update processed integration=%s status=%s conversation=%s",
         integration_id,
@@ -330,6 +362,85 @@ async def telegram_updates(integration_id: str, request: Request):
         result.get("conversation_id"),
     )
     return result
+
+
+async def _click_attribution(workspace_id, token):
+    """O parâmetro do /start é um click_id do redirect ou o slug de um link."""
+    if not token:
+        return None, None
+    click = await db.events.find_one({"workspace_id": workspace_id, "type": "click", "external_id": token})
+    if click:
+        meta = click.get("metadata") or {}
+        return click, {
+            "click_id": token, "link_id": meta.get("link_id"), "source": click.get("source"),
+            "campaign_id": meta.get("campaign_id"), "method": "last_click",
+        }
+    link = await db.tracking_links.find_one({"workspace_id": workspace_id, "slug": token.lower()})
+    if link:
+        return None, {
+            "click_id": None, "link_id": str(link["_id"]), "source": (link.get("utm_source") or "").lower() or None,
+            "campaign_id": link.get("campaign_id"), "method": "deep_link",
+        }
+    return None, None
+
+
+async def _record_bot_start(integration, player_id, message, token):
+    workspace_id = integration["workspace_id"]
+    now = datetime.now(timezone.utc)
+    external_id = f"tg-start-{message.get('chat', {}).get('id')}-{message.get('message_id')}"
+    if await db.events.find_one({"workspace_id": workspace_id, "type": "bot_start", "external_id": external_id}):
+        return
+    click, attribution = await _click_attribution(workspace_id, token)
+    player = await db.players.find_one({"_id": ObjectId(player_id)})
+    # Primeira atribuição vence: um /start novo sem parâmetro não apaga a origem.
+    attribution = attribution or (player or {}).get("attribution")
+    await db.events.insert_one({
+        "workspace_id": workspace_id, "type": "bot_start", "person_id": player_id,
+        "source": (attribution or {}).get("source"), "value": None, "currency": None,
+        "external_id": external_id,
+        "metadata": {"integration_id": str(integration["_id"]), "start_param": token, "provider": "telegram"},
+        "status": "linked", "attribution": attribution,
+        "fact_at": now, "received_at": now, "created_at": now,
+    })
+    if attribution and not (player or {}).get("attribution"):
+        await db.players.update_one({"_id": ObjectId(player_id)}, {"$set": {
+            "attribution": attribution, "source": attribution.get("source"), "updated_at": now,
+        }})
+    if click and not click.get("person_id"):
+        await db.events.update_one({"_id": click["_id"]}, {"$set": {"person_id": player_id, "status": "linked"}})
+
+
+async def _record_membership(integration, update):
+    kind = membership_change(update)
+    if not kind:
+        return {"status": "ignored", "reason": "mudança de membro sem entrada/saída"}
+    workspace_id = integration["workspace_id"]
+    member = (update.get("new_chat_member") or {}).get("user") or {}
+    chat = update.get("chat") or {}
+    user_id = str(member.get("id") or "")
+    if not user_id or member.get("is_bot"):
+        return {"status": "ignored", "reason": "membro ausente ou bot"}
+    external_id = f"tg-{kind}-{chat.get('id')}-{user_id}-{update.get('date')}"
+    if await db.events.find_one({"workspace_id": workspace_id, "type": kind, "external_id": external_id}):
+        return {"status": "duplicate"}
+    player = await db.players.find_one({"workspace_id": workspace_id, "external_ids.telegram_user_id": user_id})
+    now = datetime.now(timezone.utc)
+    attribution = (player or {}).get("attribution")
+    await db.events.insert_one({
+        "workspace_id": workspace_id, "type": kind,
+        "person_id": str(player["_id"]) if player else None,
+        "source": (attribution or {}).get("source"), "value": None, "currency": None,
+        "external_id": external_id,
+        "metadata": {
+            "integration_id": str(integration["_id"]), "provider": "telegram",
+            "chat_id": chat.get("id"), "chat_title": chat.get("title"), "telegram_user_id": user_id,
+            "invite_link": ((update.get("invite_link") or {}).get("name")),
+        },
+        "status": "linked" if player else "orphan",
+        "attribution": attribution,
+        "fact_at": now, "received_at": now, "created_at": now,
+    })
+    return {"status": "accepted", "type": kind}
 
 
 @router.get("/telegram/{integration_id}/health")
@@ -415,7 +526,9 @@ async def meta_capi(integration_id: str, request: Request):
     app_secret = credentials.get("app_secret")
     direct_secret = request.headers.get("X-CAPI-Secret", "")
     signature = request.headers.get("X-Hub-Signature-256", "")
-    if app_secret and not (
+    if not app_secret:
+        raise HTTPException(401, "Configure o App Secret da integração Meta para aceitar eventos CAPI")
+    if not (
         hmac.compare_digest(app_secret, direct_secret)
         or _verify_meta_signature(body, signature, app_secret)
     ):

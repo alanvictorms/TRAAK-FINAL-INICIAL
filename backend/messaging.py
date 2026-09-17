@@ -54,6 +54,7 @@ async def notify(
     link: Optional[str] = None,
     dedupe_key: Optional[str] = None,
     dedupe_minutes: int = 60,
+    user_ids: Optional[list] = None,
 ) -> int:
     """Entrega uma notificação nos canais ativos do workspace.
 
@@ -82,7 +83,10 @@ async def notify(
 
     delivered = 0
     if prefs["channels"]["inapp"]:
-        users = await db.users.find({"workspace_id": workspace_id}, {"_id": 1}).to_list(500)
+        query = {"workspace_id": workspace_id}
+        if user_ids:
+            query["_id"] = {"$in": [ObjectId(u) for u in user_ids if ObjectId.is_valid(u)]}
+        users = await db.users.find(query, {"_id": 1}).to_list(500)
         docs = [{
             "workspace_id": workspace_id,
             "user_id": str(u["_id"]),
@@ -338,7 +342,12 @@ async def ingest_incoming_message(
         "message_id": message_id,
         "channel": provider,
     })
-    return {"status": "accepted", "conversation_id": conversation_id, "message_id": message_id}
+    return {
+        "status": "accepted",
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "player_id": str(player["_id"]),
+    }
 
 
 FTD_DROP_MIN_DAILY_AVG = 5    # abaixo disso a média é ruído, não sinal

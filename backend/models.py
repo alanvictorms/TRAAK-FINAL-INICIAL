@@ -95,6 +95,19 @@ class TrackingLinkCreate(BaseModel):
     rules: List[Dict[str, Any]] = []
 
 
+class TrackingLinkUpdate(BaseModel):
+    name: Optional[str] = None
+    destination: Optional[str] = None
+    status: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
+    ab_variants: Optional[List[Dict[str, Any]]] = None
+    rules: Optional[List[Dict[str, Any]]] = None
+
+
 # ── Events / Ledger ──
 class EventCreate(BaseModel):
     type: str

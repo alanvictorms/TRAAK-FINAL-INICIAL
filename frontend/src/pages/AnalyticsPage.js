@@ -1,80 +1,357 @@
-import { useState, useEffect } from 'react';
-import api from '@/lib/api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import api, { formatApiError } from '@/lib/api';
+import { money, num } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { BarChart3, Headphones } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { BarChart3, Headphones, SlidersHorizontal } from 'lucide-react';
+import { toast } from 'sonner';
 
-export default function AnalyticsPage({ tab: initialTab }) {
-  const [tab, setTab] = useState(initialTab || 'media');
-  const [mediaData, setMediaData] = useState([]);
-  const [atendData, setAtendData] = useState(null);
+const PERIODS = [['24h', 'Últimas 24h'], ['7d', '7 dias'], ['30d', '30 dias'], ['90d', '90 dias']];
+const GRANULARITIES = [['hour', 'Hora'], ['day', 'Dia'], ['week', 'Semana'], ['month', 'Mês']];
+// Hora por 30/90 dias passa do limite de pontos do servidor.
+const HOUR_OK = new Set(['24h', '7d']);
+
+const MONEY_KPIS = new Set(['ftd_value', 'deposits_value', 'net_deposits', 'avg_ftd']);
+const SERIES_METRICS = [
+  ['clicks', 'Cliques'], ['registrations', 'Cadastros'], ['ftds', 'FTDs'], ['deposits_value', 'Depósitos (R$)'],
+];
+const SOURCE_LABELS = { meta: 'Meta Ads', tiktok: 'TikTok Ads', google: 'Google Ads', kwai: 'Kwai Ads', direct: 'Sem atribuição' };
+
+const fmtKpi = (key, value, currency) => {
+  if (value === null || value === undefined) return '—';
+  if (MONEY_KPIS.has(key)) return money(value, currency);
+  if (key === 'click_to_ftd') return `${value.toLocaleString('pt-BR')}%`;
+  return num(value);
+};
+
+function Change({ value }) {
+  if (value === null || value === undefined) return <div className="stat-change text-muted-foreground">sem base de comparação</div>;
+  const cls = value === 0 ? 'text-muted-foreground' : value > 0 ? 'positive' : 'negative';
+  return <div className={`stat-change ${cls}`}>{value > 0 ? '+' : ''}{value.toLocaleString('pt-BR')}% vs período anterior</div>;
+}
+
+function tickLabel(iso, granularity, tz) {
+  const opts = granularity === 'hour'
+    ? { hour: '2-digit', minute: '2-digit', timeZone: tz }
+    : granularity === 'month'
+      ? { month: 'short', year: '2-digit', timeZone: tz }
+      : { day: '2-digit', month: '2-digit', timeZone: tz };
+  return new Date(iso).toLocaleString('pt-BR', opts);
+}
+
+function MediaTab() {
+  const [filters, setFilters] = useState({ period: '30d', granularity: 'day', source: 'all' });
+  const [data, setData] = useState(null);
+  const [metric, setMetric] = useState('clicks');
+  const [compare, setCompare] = useState(true);
+  const [picking, setPicking] = useState(null);
+
+  const load = useCallback(() => {
+    const params = { period: filters.period, granularity: filters.granularity };
+    if (filters.source !== 'all') params.source = filters.source;
+    api.get('/analytics/overview', { params })
+      .then(r => setData(r.data))
+      .catch(err => toast.error(formatApiError(err.response?.data?.detail)));
+  }, [filters]);
+  useEffect(() => { load(); }, [load]);
+
+  const setPeriod = (period) => setFilters(f => ({
+    ...f, period, granularity: f.granularity === 'hour' && !HOUR_OK.has(period) ? 'day' : f.granularity,
+  }));
+
+  const chart = useMemo(() => (data?.series || []).map(p => ({
+    t: p.t, atual: p[metric], anterior: p.previous?.[metric] ?? 0,
+  })), [data, metric]);
+
+  const saveKpis = async () => {
+    try {
+      const { data: r } = await api.put('/analytics/preferences', { kpis: picking });
+      setData(d => ({ ...d, selected_kpis: r.selected_kpis }));
+      setPicking(null);
+      toast.success('KPIs salvos');
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+  };
+
+  if (!data) return <p className="text-xs text-muted-foreground mt-4">Carregando…</p>;
+
+  const kpiByKey = Object.fromEntries(data.kpis.map(k => [k.key, k]));
+  const sourceOptions = [...new Set([...data.by_source.map(s => s.source), ...(filters.source !== 'all' ? [filters.source] : [])])];
+  const maxFunnel = Math.max(1, ...data.funnel.map(s => s.count));
+  const fmtAxis = v => (metric === 'deposits_value' ? money(v).replace(',00', '') : num(v));
+
+  return (
+    <div className="space-y-4">
+      <div className="data-toolbar flex flex-wrap gap-2 items-center">
+        <Select value={filters.period} onValueChange={setPeriod}>
+          <SelectTrigger className="h-8 w-[130px] text-xs" data-testid="analytics-period"><SelectValue /></SelectTrigger>
+          <SelectContent>{PERIODS.map(([v, l]) => <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>)}</SelectContent>
+        </Select>
+        <Select value={filters.granularity} onValueChange={v => setFilters(f => ({ ...f, granularity: v }))}>
+          <SelectTrigger className="h-8 w-[110px] text-xs" data-testid="analytics-granularity"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {GRANULARITIES.map(([v, l]) => (
+              <SelectItem key={v} value={v} className="text-xs" disabled={v === 'hour' && !HOUR_OK.has(filters.period)}>{l}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filters.source} onValueChange={v => setFilters(f => ({ ...f, source: v }))}>
+          <SelectTrigger className="h-8 w-[160px] text-xs" data-testid="analytics-source"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all" className="text-xs">Todas as fontes</SelectItem>
+            {sourceOptions.map(s => <SelectItem key={s} value={s} className="text-xs">{SOURCE_LABELS[s] || s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-8 text-xs ml-auto" onClick={() => setPicking(data.selected_kpis)} data-testid="customize-kpis">
+          <SlidersHorizontal size={13} className="mr-1.5" /> Personalizar KPIs
+        </Button>
+      </div>
+
+      <div className="stats-grid">
+        {data.selected_kpis.map(key => kpiByKey[key] && (
+          <div key={key} className="stat-card" data-testid={`kpi-${key}`}>
+            <div className="stat-label">{kpiByKey[key].label}</div>
+            <div className="stat-value">{fmtKpi(key, kpiByKey[key].value, data.currency)}</div>
+            <Change value={kpiByKey[key].change} />
+          </div>
+        ))}
+      </div>
+
+      <div className="stat-card">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <span className="text-sm font-medium">Evolução</span>
+          <Select value={metric} onValueChange={setMetric}>
+            <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>{SERIES_METRICS.map(([v, l]) => <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>)}</SelectContent>
+          </Select>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground ml-auto">
+            <Switch checked={compare} onCheckedChange={setCompare} className="scale-75" /> Comparar com período anterior
+          </label>
+        </div>
+        <div style={{ width: '100%', height: 260 }}>
+          <ResponsiveContainer>
+            <LineChart data={chart} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+              <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+              <XAxis dataKey="t" tickFormatter={v => tickLabel(v, data.granularity, data.timezone)}
+                tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--border))" minTickGap={16} />
+              <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} stroke="hsl(var(--border))" width={56}
+                tickFormatter={fmtAxis} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', fontSize: 11 }}
+                labelFormatter={v => tickLabel(v, data.granularity, data.timezone)}
+                formatter={v => (metric === 'deposits_value' ? money(v) : num(v))}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="atual" name="Período atual" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
+              {compare && (
+                <Line type="monotone" dataKey="anterior" name="Período anterior" stroke="hsl(var(--chart-5))" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="stat-card" data-testid="funnel">
+        <div className="text-sm font-medium mb-3">Funil</div>
+        <div className="space-y-2">
+          {data.funnel.map(step => (
+            <div key={step.key} className="grid items-center gap-3" style={{ gridTemplateColumns: 'minmax(90px, 120px) 1fr minmax(120px, 190px)' }}>
+              <span className="text-xs">{step.label}</span>
+              <div className="h-6 rounded bg-muted overflow-hidden">
+                <div className="h-full rounded" style={{ width: `${(step.count / maxFunnel) * 100}%`, minWidth: step.count ? 2 : 0, background: 'hsl(var(--chart-1))' }} />
+              </div>
+              <div className="text-xs text-right tabular-nums">
+                <span className="font-medium">{num(step.count)}</span>
+                {step.step_rate !== null && <span className="text-muted-foreground"> · {step.step_rate.toLocaleString('pt-BR')}% do degrau</span>}
+                {compare && <span className="block text-[10px] text-muted-foreground">antes: {num(step.previous)}</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-3">
+          StartBot e entrada no canal vêm do bot do Telegram. Entrada no canal exige o bot como administrador do canal.
+        </p>
+      </div>
+
+      <div className="stat-card" style={{ overflow: 'auto' }}>
+        <div className="text-sm font-medium mb-2">Por fonte</div>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="text-xs">Fonte</TableHead>
+            <TableHead className="text-xs text-right">Cliques</TableHead>
+            <TableHead className="text-xs text-right">StartBots</TableHead>
+            <TableHead className="text-xs text-right">Cadastros</TableHead>
+            <TableHead className="text-xs text-right">FTDs</TableHead>
+            <TableHead className="text-xs text-right">Clique → FTD</TableHead>
+            <TableHead className="text-xs text-right">Depósitos</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {data.by_source.length === 0 ? (
+              <TableRow><TableCell colSpan={7}><div className="empty-state"><BarChart3 size={28} /><h3>Sem dados no período</h3><p>Os números aparecem conforme cliques e eventos chegam ao Signal Ledger.</p></div></TableCell></TableRow>
+            ) : data.by_source.map(r => (
+              <TableRow key={r.source}>
+                <TableCell className="text-xs font-medium">{SOURCE_LABELS[r.source] || r.source}</TableCell>
+                <TableCell className="text-xs text-right">{num(r.clicks)}</TableCell>
+                <TableCell className="text-xs text-right">{num(r.bot_starts)}</TableCell>
+                <TableCell className="text-xs text-right">{num(r.registrations)}</TableCell>
+                <TableCell className="text-xs text-right">{num(r.ftds)}</TableCell>
+                <TableCell className="text-xs text-right">{r.click_to_ftd === null ? '—' : `${r.click_to_ftd.toLocaleString('pt-BR')}%`}</TableCell>
+                <TableCell className="text-xs text-right">{money(r.deposits_value, data.currency)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+        <p className="text-[10px] text-muted-foreground mt-2">
+          Investimento total em campanhas: {money(data.spend_total, data.currency)} (acumulado — o gasto ainda não é registrado por dia).
+        </p>
+      </div>
+
+      <Dialog open={picking !== null} onOpenChange={o => { if (!o) setPicking(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>KPIs em destaque</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground">Escolha de 1 a 8. A escolha vale só para você.</p>
+          <div className="grid grid-cols-2 gap-2 mt-2">
+            {data.kpis.map(k => {
+              const checked = (picking || []).includes(k.key);
+              return (
+                <label key={k.key} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <Checkbox checked={checked} disabled={!checked && (picking || []).length >= 8}
+                    onCheckedChange={v => setPicking(p => (v ? [...p, k.key] : p.filter(x => x !== k.key)))} />
+                  {k.label}
+                </label>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPicking(null)}>Cancelar</Button>
+            <Button onClick={saveKpis} disabled={!picking?.length} data-testid="save-kpis">Salvar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+const minutes = (m) => {
+  if (m === null || m === undefined) return '—';
+  if (m < 60) return `${m.toLocaleString('pt-BR')} min`;
+  return `${(m / 60).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h`;
+};
+
+function AttendanceTab() {
+  const [period, setPeriod] = useState('30d');
+  const [data, setData] = useState(null);
 
   useEffect(() => {
-    if (tab === 'media') {
-      api.get('/analytics').then(r => setMediaData(r.data.items || [])).catch(() => {});
-    } else {
-      api.get('/analytics/atendimento').then(r => setAtendData(r.data)).catch(() => {});
-    }
-  }, [tab]);
+    api.get('/analytics/atendimento', { params: { period } })
+      .then(r => setData(r.data))
+      .catch(err => toast.error(formatApiError(err.response?.data?.detail)));
+  }, [period]);
 
+  if (!data) return <p className="text-xs text-muted-foreground mt-4">Carregando…</p>;
+  const maxReason = Math.max(1, ...data.close_reasons.map(r => r.count));
+
+  return (
+    <div className="space-y-4">
+      <div className="data-toolbar">
+        <Select value={period} onValueChange={setPeriod}>
+          <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>{PERIODS.map(([v, l]) => <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>)}</SelectContent>
+        </Select>
+        {data.truncated && <Badge variant="outline" className="text-[9px] ml-2">amostra limitada a 5.000 conversas</Badge>}
+      </div>
+
+      <div className="stats-grid">
+        <div className="stat-card"><div className="stat-label">Na fila agora</div><div className="stat-value">{num(data.queue)}</div></div>
+        <div className="stat-card"><div className="stat-label">Em atendimento agora</div><div className="stat-value">{num(data.active)}</div></div>
+        <div className="stat-card"><div className="stat-label">Conversas no período</div><div className="stat-value">{num(data.total)}</div></div>
+        <div className="stat-card">
+          <div className="stat-label">1ª resposta (média)</div>
+          <div className="stat-value">{minutes(data.first_response.avg)}</div>
+          <div className="stat-change text-muted-foreground">mediana {minutes(data.first_response.median)}</div>
+        </div>
+      </div>
+
+      <div className="stat-card" style={{ overflow: 'auto' }}>
+        <div className="text-sm font-medium mb-2">Por atendente</div>
+        <Table>
+          <TableHeader><TableRow>
+            <TableHead className="text-xs">Atendente</TableHead>
+            <TableHead className="text-xs text-right">Conversas</TableHead>
+            <TableHead className="text-xs text-right">Encerradas</TableHead>
+            <TableHead className="text-xs text-right">Taxa</TableHead>
+            <TableHead className="text-xs text-right">1ª resposta (média)</TableHead>
+            <TableHead className="text-xs text-right">1ª resposta (mediana)</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {data.by_agent.length === 0 ? (
+              <TableRow><TableCell colSpan={6}><div className="empty-state"><Headphones size={28} /><h3>Sem conversas no período</h3></div></TableCell></TableRow>
+            ) : data.by_agent.map(a => (
+              <TableRow key={a.agent_id || 'none'}>
+                <TableCell className="text-xs font-medium">{a.name}</TableCell>
+                <TableCell className="text-xs text-right">{num(a.conversations)}</TableCell>
+                <TableCell className="text-xs text-right">{num(a.resolved)}</TableCell>
+                <TableCell className="text-xs text-right">{a.resolution_rate === null ? '—' : `${a.resolution_rate.toLocaleString('pt-BR')}%`}</TableCell>
+                <TableCell className="text-xs text-right">{minutes(a.first_response.avg)}</TableCell>
+                <TableCell className="text-xs text-right">{minutes(a.first_response.median)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="stat-card">
+          <div className="text-sm font-medium mb-3">Motivos de encerramento</div>
+          {data.close_reasons.length === 0 ? <p className="text-xs text-muted-foreground">Nenhuma conversa encerrada no período.</p> : (
+            <div className="space-y-2">
+              {data.close_reasons.map(r => (
+                <div key={r.key} className="grid items-center gap-2" style={{ gridTemplateColumns: '120px 1fr 40px' }}>
+                  <span className="text-xs">{r.label}</span>
+                  <div className="h-2 rounded bg-muted overflow-hidden"><div className="h-full" style={{ width: `${(r.count / maxReason) * 100}%`, background: 'hsl(var(--chart-2))' }} /></div>
+                  <span className="text-xs text-right tabular-nums">{num(r.count)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="stat-card">
+          <div className="text-sm font-medium mb-3">Etiquetas mais usadas</div>
+          {data.tags.length === 0 ? <p className="text-xs text-muted-foreground">Nenhuma etiqueta nas conversas do período.</p> : (
+            <div className="flex flex-wrap gap-1.5">
+              {data.tags.map(t => <Badge key={t.tag} variant="outline" className="text-[10px]">{t.tag} · {t.count}</Badge>)}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function AnalyticsPage({ tab = 'media' }) {
+  const navigate = useNavigate();
   return (
     <div data-testid="analytics-page">
       <div className="page-header">
         <div>
           <h1>Analytics<span className="accent">.</span></h1>
-          <p className="page-description">Aquisição, conversão e retorno por origem e período.</p>
+          <p className="page-description">Aquisição, conversão e atendimento por período, com comparação ao período anterior.</p>
         </div>
       </div>
-
-      <Tabs value={tab} onValueChange={setTab}>
+      <Tabs value={tab} onValueChange={v => navigate(v === 'media' ? '/analytics' : '/analytics/atendimento')}>
         <TabsList>
           <TabsTrigger value="media" className="text-xs gap-1.5"><BarChart3 size={12} /> Mídia</TabsTrigger>
           <TabsTrigger value="atendimento" className="text-xs gap-1.5"><Headphones size={12} /> Atendimento</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="media" className="mt-4">
-          <div className="stat-card" style={{ overflow: 'auto' }}>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Origem</TableHead>
-                  <TableHead className="text-xs">Cliques</TableHead>
-                  <TableHead className="text-xs">Cadastros</TableHead>
-                  <TableHead className="text-xs">FTDs</TableHead>
-                  <TableHead className="text-xs">Depósitos</TableHead>
-                  <TableHead className="text-xs">Valor</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {mediaData.length === 0 ? (
-                  <TableRow><TableCell colSpan={6}><div className="empty-state"><BarChart3 size={28} /><h3>Sem dados</h3><p>Dados aparecerão conforme eventos forem registrados no Ledger.</p></div></TableCell></TableRow>
-                ) : mediaData.map((item, i) => (
-                  <TableRow key={i}>
-                    <TableCell className="text-xs font-medium">{item.source}</TableCell>
-                    <TableCell className="text-xs">{item.clicks}</TableCell>
-                    <TableCell className="text-xs">{item.registrations}</TableCell>
-                    <TableCell className="text-xs">{item.ftds}</TableCell>
-                    <TableCell className="text-xs">{item.deposits}</TableCell>
-                    <TableCell className="text-xs">R$ {(item.value || 0).toFixed(2)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="atendimento" className="mt-4">
-          {atendData && (
-            <div className="stats-grid mb-4">
-              <div className="stat-card"><div className="stat-label">NA FILA</div><div className="stat-value">{atendData.queue}</div></div>
-              <div className="stat-card"><div className="stat-label">EM ATENDIMENTO</div><div className="stat-value">{atendData.active}</div></div>
-            </div>
-          )}
-          <div className="stat-card p-4">
-            <p className="text-xs text-muted-foreground">Métricas de primeira resposta, SLA e conversão por atendente aguardam definição (D06).</p>
-          </div>
-        </TabsContent>
+        <TabsContent value="media" className="mt-4">{tab === 'media' && <MediaTab />}</TabsContent>
+        <TabsContent value="atendimento" className="mt-4">{tab === 'atendimento' && <AttendanceTab />}</TabsContent>
       </Tabs>
     </div>
   );

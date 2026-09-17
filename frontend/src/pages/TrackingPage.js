@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import api from '@/lib/api';
+import { useNavigate, useParams } from 'react-router-dom';
+import api, { formatApiError } from '@/lib/api';
+import TrackingDetail from '@/components/tracking/TrackingDetail';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +12,13 @@ import { Search, Link2, Plus, Copy, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function TrackingPage() {
+  const { id } = useParams();
+  if (id) return <TrackingDetail key={id} id={id} />;
+  return <TrackingList />;
+}
+
+function TrackingList() {
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -31,12 +40,12 @@ export default function TrackingPage() {
   const handleCreate = async (e) => {
     e.preventDefault();
     try {
-      await api.post('/tracking', form);
+      const { data } = await api.post('/tracking', form);
       toast.success('Link criado');
       setShowCreate(false);
       setForm({ name: '', slug: '', destination: '', utm_source: '', utm_medium: '', utm_campaign: '' });
-      load();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Erro'); }
+      navigate(`/tracking/${data._id}`);
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const handleDelete = async (id) => {
@@ -45,8 +54,8 @@ export default function TrackingPage() {
   };
 
   const copyUrl = (item) => {
-    const url = `https://${item.domain_id || 'trk.example.com'}/${item.slug}`;
-    navigator.clipboard.writeText(url);
+    if (!item.public_url) { toast.error('URL pública da plataforma não configurada'); return; }
+    navigator.clipboard.writeText(item.public_url);
     toast.success('URL copiada');
   };
 
@@ -76,6 +85,7 @@ export default function TrackingPage() {
               <TableHead className="text-xs">Slug</TableHead>
               <TableHead className="text-xs">Destino</TableHead>
               <TableHead className="text-xs">UTM Source</TableHead>
+              <TableHead className="text-xs">Status</TableHead>
               <TableHead className="text-xs">Cliques</TableHead>
               <TableHead className="text-xs">FTDs</TableHead>
               <TableHead className="text-xs text-right">Ações</TableHead>
@@ -83,18 +93,19 @@ export default function TrackingPage() {
           </TableHeader>
           <TableBody>
             {items.length === 0 ? (
-              <TableRow><TableCell colSpan={7}><div className="empty-state"><Link2 size={32} /><h3>Nenhum link</h3><p>Crie seu primeiro link de tracking.</p></div></TableCell></TableRow>
+              <TableRow><TableCell colSpan={8}><div className="empty-state"><Link2 size={32} /><h3>Nenhum link</h3><p>Crie seu primeiro link de tracking.</p></div></TableCell></TableRow>
             ) : items.map(item => (
-              <TableRow key={item._id}>
+              <TableRow key={item._id} className="cursor-pointer" onClick={() => navigate(`/tracking/${item._id}`)} data-testid={`link-row-${item.slug}`}>
                 <TableCell className="text-xs font-medium">{item.name}</TableCell>
                 <TableCell className="text-[10px] font-mono text-primary">/{item.slug}</TableCell>
                 <TableCell className="text-[10px] text-muted-foreground max-w-[200px] truncate">{item.destination}</TableCell>
                 <TableCell className="text-xs">{item.utm_source || '—'}</TableCell>
+                <TableCell><Badge className={`text-[9px] ${item.status === 'active' ? 'badge-success' : 'badge-warning'}`}>{item.status === 'active' ? 'Ativo' : 'Pausado'}</Badge></TableCell>
                 <TableCell className="text-xs">{item.clicks || 0}</TableCell>
                 <TableCell className="text-xs">{item.ftds || 0}</TableCell>
                 <TableCell className="text-right">
-                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => copyUrl(item)}><Copy size={13} /></Button>
+                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }} onClick={e => e.stopPropagation()}>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Copiar URL" onClick={() => copyUrl(item)}><Copy size={13} /></Button>
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(item._id)}><Trash2 size={13} /></Button>
                   </div>
                 </TableCell>
@@ -109,8 +120,8 @@ export default function TrackingPage() {
           <DialogHeader><DialogTitle>Criar link de tracking</DialogTitle></DialogHeader>
           <form onSubmit={handleCreate} className="space-y-3">
             <div><Label className="text-xs">Nome</Label><Input className="text-xs mt-1" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></div>
-            <div><Label className="text-xs">Slug</Label><Input className="text-xs mt-1" value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value }))} required placeholder="meu-link" /></div>
-            <div><Label className="text-xs">Destino (URL)</Label><Input className="text-xs mt-1" type="url" value={form.destination} onChange={e => setForm(f => ({ ...f, destination: e.target.value }))} required placeholder="https://..." /></div>
+            <div><Label className="text-xs">Slug</Label><Input className="text-xs mt-1" value={form.slug} onChange={e => setForm(f => ({ ...f, slug: e.target.value.toLowerCase() }))} required placeholder="meu-link" pattern="[a-z0-9][a-z0-9-]{1,63}" title="Letras minúsculas, números e hífen" /></div>
+            <div><Label className="text-xs">Destino (URL)</Label><Input className="text-xs mt-1" type="url" value={form.destination} onChange={e => setForm(f => ({ ...f, destination: e.target.value }))} required placeholder="https://t.me/SeuBot" /></div>
             <div className="grid grid-cols-3 gap-2">
               <div><Label className="text-xs">utm_source</Label><Input className="text-xs mt-1" value={form.utm_source} onChange={e => setForm(f => ({ ...f, utm_source: e.target.value }))} placeholder="meta" /></div>
               <div><Label className="text-xs">utm_medium</Label><Input className="text-xs mt-1" value={form.utm_medium} onChange={e => setForm(f => ({ ...f, utm_medium: e.target.value }))} placeholder="cpc" /></div>
