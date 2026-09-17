@@ -11,6 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Bot, Brain, Plus, Send, Sparkles, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import BRAIN_HTML from '@/lib/brainPage';
 
 const fail = err => toast.error(formatApiError(err.response?.data?.detail));
 const TEMPLATES = {
@@ -368,7 +369,7 @@ function BrainPanel() {
       </div>
       <p className="text-[10px] text-muted-foreground">O agente lê isto antes de responder: volume de leads, fontes, assuntos, etiquetas e o que você ensinar aqui.</p>
       <div className="brain-canvas">
-        <iframe src="/brain/" title="Cérebro da workspace" loading="lazy" />
+        <iframe srcDoc={BRAIN_HTML} title="Cérebro da workspace" loading="lazy" sandbox="allow-scripts" />
         <div className="brain-overlay">
           <strong>{brain.players}</strong><span>leads na memória</span>
         </div>
