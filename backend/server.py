@@ -23,6 +23,7 @@ from routes.webhook_routes import router as webhook_router
 from telegram_service import sync_telegram_webhooks
 from messaging import monitor_loop
 from automation_runner import worker_loop
+from dispatch_runner import worker_loop as dispatch_loop
 import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -150,6 +151,9 @@ async def startup():
     # distribuído se o custo das consultas pesar.
     app.state.monitor = asyncio.create_task(monitor_loop())
     app.state.automations = asyncio.create_task(worker_loop())
+    app.state.dispatches = asyncio.create_task(dispatch_loop())
+    await db.dispatch_recipients.create_index([("dispatch_id", 1), ("status", 1)])
+    await db.suppressions.create_index([("workspace_id", 1), ("provider", 1), ("contact", 1)], unique=True)
     await db.automation_runs.create_index([("status", 1), ("resume_at", 1), ("created_at", 1)])
     await db.automation_runs.create_index([("automation_id", 1), ("conversation_id", 1)])
     await db.automation_versions.create_index([("automation_id", 1), ("version", -1)], unique=True)
@@ -157,7 +161,7 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    for task in (getattr(app.state, "monitor", None), getattr(app.state, "automations", None)):
+    for task in (getattr(app.state, name, None) for name in ("monitor", "automations", "dispatches")):
         if task:
             task.cancel()
     client.close()

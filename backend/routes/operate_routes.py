@@ -1,12 +1,14 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from bson import ObjectId
-from database import db, audit
+from database import db, audit, active_policy, is_killed
 from auth import get_current_user
 from messaging import send_channel_message, notify
 from analytics import CLOSE_REASONS
 from automation_engine import GraphError, simulate as simulate_graph, validate as validate_graph
+from segments import FIELDS as SEGMENT_FIELDS, SegmentError, segment_query
+from dispatch_runner import eligible_recipients, variants_of
 from realtime import inbox_events
 from models import (
     ConversationCreate, MessageCreate, SegmentCreate,
@@ -750,46 +752,195 @@ async def get_automation_analytics(automation_id: str, request: Request):
 
 
 # ── Segments ──
+async def _segment_or_404(segment_id, ws_id):
+    if not ObjectId.is_valid(segment_id):
+        raise HTTPException(404, "Segmento não encontrado")
+    doc = await db.segments.find_one({"_id": ObjectId(segment_id), "workspace_id": ws_id})
+    if not doc:
+        raise HTTPException(404, "Segmento não encontrado")
+    return doc
+
+
+def _query_or_400(ws_id, conditions, logic):
+    try:
+        return segment_query(ws_id, conditions, logic)
+    except SegmentError as exc:
+        raise HTTPException(400, str(exc))
+
+
 @router.get("/segments")
 async def list_segments(request: Request, page: int = 1, limit: int = 50):
     user = await get_current_user(request)
-    query = {"workspace_id": user["workspace_id"]}
+    ws_id = user["workspace_id"]
+    query = {"workspace_id": ws_id}
     total = await db.segments.count_documents(query)
     items = await db.segments.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
+    now = datetime.now(timezone.utc)
     for item in items:
         item["_id"] = str(item["_id"])
-    return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1}
+        # Contagem ao vivo: segmento é dinâmico.
+        try:
+            item["count"] = await db.players.count_documents(segment_query(ws_id, item.get("conditions"), item.get("logic", "and")))
+            item["last_evaluated"] = now
+        except SegmentError as exc:
+            item["count"], item["error"] = None, str(exc)
+    return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1,
+            "fields": SEGMENT_FIELDS}
+
+
+@router.post("/segments/preview")
+async def preview_segment(request: Request):
+    user = await get_current_user(request)
+    body = await _body(request)
+    query = _query_or_400(user["workspace_id"], body.get("conditions"), body.get("logic", "and"))
+    count = await db.players.count_documents(query)
+    sample = await db.players.find(query, {"name": 1, "source": 1, "has_ftd": 1}).limit(10).to_list(10)
+    return {"count": count, "sample": [{"id": str(p["_id"]), "name": p.get("name"), "source": p.get("source"),
+                                        "has_ftd": p.get("has_ftd", False)} for p in sample]}
 
 
 @router.post("/segments")
 async def create_segment(body: SegmentCreate, request: Request):
     user = await get_current_user(request)
+    query = _query_or_400(user["workspace_id"], body.conditions, body.logic)
     now = datetime.now(timezone.utc)
     doc = {
         "workspace_id": user["workspace_id"],
         "name": body.name,
         "conditions": body.conditions,
         "logic": body.logic,
-        "count": 0,
-        "last_evaluated": None,
+        "count": await db.players.count_documents(query),
+        "last_evaluated": now,
         "created_at": now,
         "updated_at": now,
     }
     result = await db.segments.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
+    await audit(user, "segment.create", doc["_id"], "segment")
     return doc
+
+
+@router.get("/segments/{segment_id}/members")
+async def segment_members(segment_id: str, request: Request, limit: int = 50):
+    user = await get_current_user(request)
+    seg = await _segment_or_404(segment_id, user["workspace_id"])
+    query = _query_or_400(user["workspace_id"], seg.get("conditions"), seg.get("logic", "and"))
+    items = await db.players.find(query, {"name": 1, "source": 1, "has_ftd": 1, "total_deposits": 1, "tags": 1}) \
+        .sort("created_at", -1).limit(min(limit, 200)).to_list(min(limit, 200))
+    for p in items:
+        p["_id"] = str(p["_id"])
+    return {"items": items, "total": await db.players.count_documents(query)}
 
 
 @router.delete("/segments/{segment_id}")
 async def delete_segment(segment_id: str, request: Request):
     user = await get_current_user(request)
-    result = await db.segments.delete_one({"_id": ObjectId(segment_id), "workspace_id": user["workspace_id"]})
-    if result.deleted_count == 0:
-        raise HTTPException(404, "Segmento não encontrado")
+    seg = await _segment_or_404(segment_id, user["workspace_id"])
+    if await db.dispatches.find_one({"segment_id": segment_id, "status": {"$in": ["scheduled", "queued", "sending"]}}):
+        raise HTTPException(400, "Há disparo pendente usando este segmento")
+    await db.segments.delete_one({"_id": seg["_id"]})
+    await audit(user, "segment.delete", segment_id, "segment")
     return {"detail": "Removido"}
 
 
-# ── Dispatches ──
+# ── Disparos: templates ──
+@router.get("/disparos/templates")
+async def list_templates(request: Request):
+    user = await get_current_user(request)
+    items = await db.message_templates.find({"workspace_id": user["workspace_id"]}).sort("name", 1).to_list(200)
+    for t in items:
+        t["_id"] = str(t["_id"])
+    return {"items": items}
+
+
+@router.post("/disparos/templates")
+async def create_template(request: Request):
+    user = await get_current_user(request)
+    body = await _body(request)
+    name, text = (body.get("name") or "").strip(), (body.get("text") or "").strip()
+    if not name or not text:
+        raise HTTPException(400, "Template precisa de nome e texto")
+    if len(text) > 4096:
+        raise HTTPException(400, "Texto acima de 4096 caracteres (limite do Telegram)")
+    doc = {"workspace_id": user["workspace_id"], "name": name, "text": text,
+           "created_by": user["_id"], "created_at": datetime.now(timezone.utc)}
+    doc["_id"] = str((await db.message_templates.insert_one(doc)).inserted_id)
+    return doc
+
+
+@router.delete("/disparos/templates/{template_id}")
+async def delete_template(template_id: str, request: Request):
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(template_id):
+        raise HTTPException(404, "Template não encontrado")
+    result = await db.message_templates.delete_one({"_id": ObjectId(template_id), "workspace_id": user["workspace_id"]})
+    if not result.deleted_count:
+        raise HTTPException(404, "Template não encontrado")
+    return {"detail": "Removido"}
+
+
+# ── Disparos: supressão ──
+@router.get("/disparos/suppressions")
+async def list_suppressions(request: Request, contact: str = None, limit: int = 100):
+    user = await get_current_user(request)
+    query = {"workspace_id": user["workspace_id"]}
+    if contact:
+        query["contact"] = contact.strip()
+    items = await db.suppressions.find(query).sort("created_at", -1).limit(min(limit, 500)).to_list(min(limit, 500))
+    for s_ in items:
+        s_["_id"] = str(s_["_id"])
+    return {"items": items, "total": await db.suppressions.count_documents(query)}
+
+
+@router.post("/disparos/suppressions")
+async def add_suppression(request: Request):
+    user = await get_current_user(request)
+    body = await _body(request)
+    contact, provider = str(body.get("contact") or "").strip(), (body.get("provider") or "").strip()
+    if not contact or provider not in ("telegram", "whatsapp"):
+        raise HTTPException(400, "Informe o contato e o canal (telegram ou whatsapp)")
+    now = datetime.now(timezone.utc)
+    await db.suppressions.update_one(
+        {"workspace_id": user["workspace_id"], "provider": provider, "contact": contact},
+        {"$setOnInsert": {"reason": (body.get("reason") or "manual").strip(), "created_by": user["_id"], "created_at": now}},
+        upsert=True,
+    )
+    await audit(user, "suppression.add", contact, "suppression")
+    return {"detail": "Contato suprimido"}
+
+
+@router.delete("/disparos/suppressions/{suppression_id}")
+async def remove_suppression(suppression_id: str, request: Request):
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(suppression_id):
+        raise HTTPException(404, "Registro não encontrado")
+    result = await db.suppressions.delete_one({"_id": ObjectId(suppression_id), "workspace_id": user["workspace_id"]})
+    if not result.deleted_count:
+        raise HTTPException(404, "Registro não encontrado")
+    await audit(user, "suppression.remove", suppression_id, "suppression")
+    return {"detail": "Removido da supressão"}
+
+
+# ── Disparos ──
+async def _dispatch_or_404(dispatch_id, ws_id):
+    if not ObjectId.is_valid(dispatch_id):
+        raise HTTPException(404, "Disparo não encontrado")
+    doc = await db.dispatches.find_one({"_id": ObjectId(dispatch_id), "workspace_id": ws_id})
+    if not doc:
+        raise HTTPException(404, "Disparo não encontrado")
+    return doc
+
+
+async def _channel_or_400(channel_id, ws_id):
+    if not ObjectId.is_valid(str(channel_id or "")):
+        raise HTTPException(400, "Escolha o canal (conexão de Telegram ou WhatsApp)")
+    integration = await db.integrations.find_one({"_id": ObjectId(channel_id), "workspace_id": ws_id,
+                                                  "provider": {"$in": ["telegram", "whatsapp"]}})
+    if not integration:
+        raise HTTPException(400, "Canal inválido")
+    return integration
+
+
 @router.get("/disparos")
 async def list_dispatches(request: Request, status: str = None, page: int = 1, limit: int = 50):
     user = await get_current_user(request)
@@ -806,6 +957,20 @@ async def list_dispatches(request: Request, status: str = None, page: int = 1, l
 @router.post("/disparos")
 async def create_dispatch(body: DispatchCreate, request: Request):
     user = await get_current_user(request)
+    await _channel_or_400(body.channel, user["workspace_id"])
+    if body.segment_id:
+        await _segment_or_404(body.segment_id, user["workspace_id"])
+    probe = {"content": body.content}
+    if not variants_of(probe):
+        raise HTTPException(400, "Escreva a mensagem (ou ao menos uma variante com peso)")
+    scheduled_at = None
+    if body.scheduled_at:
+        try:
+            scheduled_at = datetime.fromisoformat(body.scheduled_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(400, "Data de agendamento inválida")
+        if scheduled_at.tzinfo is None:
+            raise HTTPException(400, "Agendamento precisa de fuso horário")
     now = datetime.now(timezone.utc)
     doc = {
         "workspace_id": user["workspace_id"],
@@ -813,25 +978,132 @@ async def create_dispatch(body: DispatchCreate, request: Request):
         "channel": body.channel,
         "segment_id": body.segment_id,
         "content": body.content,
-        "scheduled_at": body.scheduled_at,
+        "scheduled_at": scheduled_at,
         "recurrence": body.recurrence,
         "status": "draft",
-        "stats": {"target": 0, "eligible": 0, "sent": 0, "delivered": 0, "clicked": 0, "ftds": 0},
+        "stats": {"target": 0, "eligible": 0, "sent": 0, "failed": 0},
         "created_at": now,
         "updated_at": now,
         "created_by": user["_id"],
     }
     result = await db.dispatches.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
+    await audit(user, "dispatch.create", doc["_id"], "dispatch")
     return doc
+
+
+@router.post("/disparos/{dispatch_id}/preflight")
+async def preflight_dispatch(dispatch_id: str, request: Request):
+    """Contagem real antes de enviar: quem está no segmento, quem pode receber e por que não."""
+    user = await get_current_user(request)
+    dispatch = await _dispatch_or_404(dispatch_id, user["workspace_id"])
+    integration = await _channel_or_400(dispatch.get("channel"), user["workspace_id"])
+    try:
+        total, eligible, skipped = await eligible_recipients(dispatch, integration)
+    except SegmentError as exc:
+        raise HTTPException(400, str(exc))
+    variants = variants_of(dispatch)
+    weight = sum(float(v.get("weight") or 0) for v in variants) or 1
+    return {
+        "channel": {"name": integration.get("name"), "provider": integration.get("provider")},
+        "target": total, "eligible": len(eligible), "skipped": skipped,
+        "variants": [{"name": v.get("name"), "share": round(float(v.get("weight") or 0) / weight * 100, 1),
+                      "expected": round(len(eligible) * float(v.get("weight") or 0) / weight)} for v in variants],
+        "sample": [{"name": p.get("name"), "contact_masked": c[:3] + "…" + c[-2:]} for p, c in eligible[:5]],
+        "note": "WhatsApp só entrega texto livre dentro da janela de 24h da última mensagem do lead."
+                if integration.get("provider") == "whatsapp" else None,
+    }
+
+
+@router.post("/disparos/{dispatch_id}/send")
+async def send_dispatch(dispatch_id: str, request: Request):
+    user = await get_current_user(request)
+    dispatch = await _dispatch_or_404(dispatch_id, user["workspace_id"])
+    if dispatch["status"] not in ("draft", "failed"):
+        raise HTTPException(400, f"Disparo já está {dispatch['status']}")
+    ws_id = user["workspace_id"]
+    if await is_killed(ws_id, "dispatches"):
+        raise HTTPException(423, "Disparos estão bloqueados em Governança")
+    policy = await active_policy(ws_id, "dispatch_approval")
+    if policy and not dispatch.get("approved_by"):
+        integration = await _channel_or_400(dispatch.get("channel"), ws_id)
+        try:
+            _, eligible, _ = await eligible_recipients(dispatch, integration)
+        except SegmentError as exc:
+            raise HTTPException(400, str(exc))
+        if len(eligible) >= int(policy["config"]["min_recipients"]):
+            from routes.prove_routes import create_approval_doc
+            approval = await create_approval_doc(
+                user, "dispatch_send", dispatch_id, "dispatch",
+                {"name": dispatch.get("name"), "recipients": len(eligible), "policy": policy["name"]},
+                f"{len(eligible)} destinatários — política '{policy['name']}' exige aprovação a partir de {policy['config']['min_recipients']}")
+            await db.dispatches.update_one({"_id": dispatch["_id"]}, {"$set": {
+                "status": "awaiting_approval", "approval_id": approval["_id"], "updated_at": datetime.now(timezone.utc)}})
+            await audit(user, "dispatch.awaiting_approval", dispatch_id, "dispatch")
+            return {"status": "awaiting_approval", "approval_id": approval["_id"]}
+    scheduled = dispatch.get("scheduled_at")
+    status = "scheduled" if scheduled and scheduled > datetime.now(timezone.utc) else "queued"
+    await db.dispatches.update_one({"_id": dispatch["_id"]}, {"$set": {
+        "status": status, "approved_by": user["_id"], "updated_at": datetime.now(timezone.utc)}})
+    await audit(user, f"dispatch.{status}", dispatch_id, "dispatch")
+    return {"status": status}
+
+
+@router.post("/disparos/{dispatch_id}/cancel")
+async def cancel_dispatch(dispatch_id: str, request: Request):
+    user = await get_current_user(request)
+    dispatch = await _dispatch_or_404(dispatch_id, user["workspace_id"])
+    if dispatch["status"] not in ("scheduled", "queued", "sending"):
+        raise HTTPException(400, "Só dá para cancelar disparo agendado ou em envio")
+    await db.dispatches.update_one({"_id": dispatch["_id"]}, {"$set": {"status": "cancelled", "updated_at": datetime.now(timezone.utc)}})
+    cancelled = await db.dispatch_recipients.update_many({"dispatch_id": dispatch_id, "status": "queued"},
+                                                         {"$set": {"status": "cancelled"}})
+    await audit(user, "dispatch.cancel", dispatch_id, "dispatch")
+    return {"detail": "Disparo cancelado", "not_sent": cancelled.modified_count}
+
+
+@router.get("/disparos/{dispatch_id}/report")
+async def dispatch_report(dispatch_id: str, request: Request):
+    user = await get_current_user(request)
+    dispatch = await _dispatch_or_404(dispatch_id, user["workspace_id"])
+    rows = await db.dispatch_recipients.aggregate([
+        {"$match": {"dispatch_id": dispatch_id}},
+        {"$group": {"_id": {"variant": "$variant", "status": "$status"}, "n": {"$sum": 1}}},
+    ]).to_list(200)
+    by_variant = {}
+    for r in rows:
+        v = by_variant.setdefault(r["_id"]["variant"] or "—", {"variant": r["_id"]["variant"] or "—"})
+        v[r["_id"]["status"]] = r["n"]
+    # FTD depois do envio: quem recebeu e fez o primeiro depósito em até 7 dias.
+    started = dispatch.get("started_at")
+    ftds = {}
+    if started:
+        ids = [r["player_id"] async for r in db.dispatch_recipients.find({"dispatch_id": dispatch_id, "status": "sent"}, {"player_id": 1})]
+        variants_by_player = {r["player_id"]: r.get("variant") async for r in db.dispatch_recipients.find(
+            {"dispatch_id": dispatch_id, "status": "sent"}, {"player_id": 1, "variant": 1})}
+        oids = [ObjectId(i) for i in ids if ObjectId.is_valid(i)]
+        async for p in db.players.find({"_id": {"$in": oids}, "ftd_at": {"$gte": started, "$lte": started + timedelta(days=7)}}, {"_id": 1}):
+            key = variants_by_player.get(str(p["_id"])) or "—"
+            ftds[key] = ftds.get(key, 0) + 1
+    for key, v in by_variant.items():
+        v["ftds"] = ftds.get(key, 0)
+        v["conversion"] = round(v["ftds"] / v["sent"] * 100, 1) if v.get("sent") else None
+    failures = await db.dispatch_recipients.find({"dispatch_id": dispatch_id, "status": "failed"},
+                                                 {"player_name": 1, "error": 1, "sent_at": 1}).limit(50).to_list(50)
+    for f in failures:
+        f["_id"] = str(f["_id"])
+    dispatch["_id"] = str(dispatch["_id"])
+    return {"dispatch": dispatch, "by_variant": list(by_variant.values()), "failures": failures}
 
 
 @router.delete("/disparos/{dispatch_id}")
 async def delete_dispatch(dispatch_id: str, request: Request):
     user = await get_current_user(request)
-    result = await db.dispatches.delete_one({"_id": ObjectId(dispatch_id), "workspace_id": user["workspace_id"]})
-    if result.deleted_count == 0:
-        raise HTTPException(404, "Disparo não encontrado")
+    dispatch = await _dispatch_or_404(dispatch_id, user["workspace_id"])
+    if dispatch["status"] in ("queued", "sending"):
+        raise HTTPException(400, "Cancele o disparo antes de remover")
+    await db.dispatches.delete_one({"_id": dispatch["_id"]})
+    await db.dispatch_recipients.delete_many({"dispatch_id": dispatch_id})
     return {"detail": "Removido"}
 
 

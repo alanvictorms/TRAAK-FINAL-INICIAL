@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from datetime import datetime, timezone
-from database import db
+from database import db, is_killed
 from auth import get_current_user
 from models import CopilotMessage
 import os
@@ -31,6 +31,8 @@ async def get_ai_config():
 @router.post("/copilot/chat")
 async def copilot_chat(body: CopilotMessage, request: Request):
     user = await get_current_user(request)
+    if await is_killed(user.get("workspace_id"), "ai"):
+        raise HTTPException(423, "Copiloto bloqueado em Governança")
     config = await get_ai_config()
     if not config:
         raise HTTPException(503, "Nenhum provedor de IA configurado. Configure em Plataforma > IA.")

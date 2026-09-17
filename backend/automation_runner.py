@@ -14,7 +14,7 @@ import httpx
 from bson import ObjectId
 
 from automation_engine import advance, trigger_id
-from database import db
+from database import db, is_killed
 from messaging import send_channel_message
 from realtime import inbox_events
 
@@ -44,6 +44,8 @@ async def _safe_webhook_url(url: str) -> bool:
 async def _ai_reply(workspace_id, prompt, message):
     from routes.copilot_routes import get_ai_config
     from emergentintegrations.llm.chat import LlmChat, UserMessage
+    if await is_killed(workspace_id, "ai"):
+        raise RuntimeError("IA bloqueada em Governança")
     config = await get_ai_config()
     if not config:
         raise RuntimeError("nenhum provedor de IA configurado")
@@ -189,6 +191,12 @@ async def worker_loop():
     while True:
         try:
             for run in await claim_batch():
+                if await is_killed(run.get("workspace_id"), "automations"):
+                    # Pausada, não perdida: volta a andar quando o kill switch for desligado.
+                    await db.automation_runs.update_one({"_id": run["_id"]}, {"$set": {
+                        "status": "waiting", "locked_until": None,
+                        "resume_at": datetime.now(timezone.utc) + timedelta(seconds=60)}})
+                    continue
                 try:
                     await process_run(run)
                 except Exception as exc:  # noqa: BLE001

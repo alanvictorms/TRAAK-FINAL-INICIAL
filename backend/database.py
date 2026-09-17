@@ -21,3 +21,13 @@ async def audit(user, action, object_id=None, object_type=None):
         "object_type": object_type,
         "timestamp": datetime.now(timezone.utc),
     })
+
+
+async def is_killed(workspace_id, key):
+    """Kill switch ligado em Governança = a função está bloqueada no workspace."""
+    return bool(await db.kill_switches.find_one({"workspace_id": workspace_id, "key": key, "active": True}, {"_id": 1}))
+
+
+async def active_policy(workspace_id, policy_type):
+    return await db.governance_policies.find_one(
+        {"workspace_id": workspace_id, "type": policy_type, "status": "active"}, sort=[("created_at", -1)])

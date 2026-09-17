@@ -9,6 +9,7 @@ from bson import ObjectId
 
 from database import db
 from realtime import inbox_events
+from segments import is_opt_out
 
 
 logger = logging.getLogger(__name__)
@@ -348,6 +349,12 @@ async def ingest_incoming_message(
         {"$set": {"last_sync": now, "status": "active"}},
     )
 
+    if is_opt_out(content):
+        await db.suppressions.update_one(
+            {"workspace_id": workspace_id, "provider": provider, "contact": str(external_chat_id)},
+            {"$setOnInsert": {"reason": "opt-out do lead", "created_at": now}},
+            upsert=True,
+        )
     await _start_automations(
         workspace_id, integration_id, conversation_id, message_id, str(player["_id"])
     )
@@ -422,4 +429,9 @@ async def monitor_loop(interval_seconds: int = 900) -> None:
             await run_monitors()
         except Exception as exc:  # noqa: BLE001 — o laço não pode morrer por um workspace
             logger.error("monitor falhou: %s", exc)
+        try:
+            from routes.prove_routes import run_due_reports
+            await run_due_reports()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("relatórios agendados falharam: %s", exc)
         await asyncio.sleep(interval_seconds)

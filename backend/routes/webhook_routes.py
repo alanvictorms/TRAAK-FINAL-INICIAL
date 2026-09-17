@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, HTTPException
 from datetime import datetime, timezone, timedelta
-from database import db
+from database import db, is_killed
 from bson import ObjectId
 from messaging import ingest_incoming_message, notify
 from attribution import is_start_command, membership_change, start_param
@@ -91,6 +91,9 @@ async def _process_tap(request: Request, workspace_id: str, integration: dict):
       "metadata": {}
     }
     """
+    if await is_killed(workspace_id, "ingest_tap"):
+        # 503: a casa reenvia o postback depois; nada é descartado em silêncio.
+        raise HTTPException(503, "Recebimento de postbacks pausado em Governança")
     now = datetime.now(timezone.utc)
     payload_bytes = await request.body()
 
@@ -521,6 +524,8 @@ async def meta_updates(integration_id: str, request: Request):
 async def meta_capi(integration_id: str, request: Request):
     """Validate, ledger and forward one server-side conversion to Meta CAPI."""
     integration = await _messaging_integration(integration_id, "meta")
+    if await is_killed(integration["workspace_id"], "capi"):
+        raise HTTPException(423, "Envio para a Meta bloqueado em Governança")
     body = await request.body()
     credentials = integration.get("credentials") or {}
     app_secret = credentials.get("app_secret")
