@@ -21,6 +21,7 @@ from routes.platform_routes import router as platform_router
 from routes.copilot_routes import router as copilot_router
 from routes.webhook_routes import router as webhook_router
 from routes.workspace_routes import router as workspace_router
+from routes.admin_routes import router as admin_router, public_router as status_router
 from telegram_service import sync_telegram_webhooks
 from messaging import monitor_loop
 from automation_runner import worker_loop
@@ -55,6 +56,8 @@ app.include_router(platform_router)
 app.include_router(copilot_router)
 app.include_router(webhook_router)
 app.include_router(workspace_router)
+app.include_router(admin_router)
+app.include_router(status_router)
 
 
 @app.get("/api")

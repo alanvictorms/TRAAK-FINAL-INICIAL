@@ -12,7 +12,7 @@ import {
   LayoutDashboard, BarChart3, Link2, Globe, Radar, Activity, Users, Fingerprint,
   MessageSquare, Workflow, Target, Send, Megaphone, DollarSign, FileText, Shield, CheckSquare,
   Settings, UsersRound, Key, Receipt, Bell, ClipboardList, Building2, CreditCard, Bot,
-  Menu, LogOut, ChevronRight, User
+  Gauge, ShieldCheck, LifeBuoy, Menu, LogOut, ChevronRight, User
 } from 'lucide-react';
 
 const navGroups = [
@@ -72,6 +72,9 @@ const platformItems = [
   { to: '/platform/tenants', icon: Building2, label: 'Tenants' },
   { to: '/platform/plans', icon: CreditCard, label: 'Planos' },
   { to: '/platform/ai', icon: Bot, label: 'Provedores IA' },
+  { to: '/platform/billing', icon: Gauge, label: 'Uso e faturas' },
+  { to: '/platform/reliability', icon: ShieldCheck, label: 'Confiabilidade' },
+  { to: '/platform/support', icon: LifeBuoy, label: 'Suporte' },
 ];
 
 function SidebarNav({ onNavigate }) {

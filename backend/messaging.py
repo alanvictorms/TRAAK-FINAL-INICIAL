@@ -457,10 +457,16 @@ async def recheck_domains() -> None:
 async def monitor_loop(interval_seconds: int = 900) -> None:
     import asyncio
     while True:
+        beat = {"at": datetime.now(timezone.utc), "ok": True}
         try:
             await run_monitors()
         except Exception as exc:  # noqa: BLE001 — o laço não pode morrer por um workspace
+            beat.update({"ok": False, "error": str(exc)[:200]})
             logger.error("monitor falhou: %s", exc)
+        try:
+            await db.health_beats.insert_one(beat)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("batimento de saúde: %s", exc)
         try:
             await recheck_domains()
         except Exception as exc:  # noqa: BLE001

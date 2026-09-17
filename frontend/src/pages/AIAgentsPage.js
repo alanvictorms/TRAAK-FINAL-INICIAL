@@ -380,14 +380,14 @@ function BrainPanel() {
         <div className="lead-metric"><span>Conversas abertas</span><strong>{brain.open_conversations}</strong></div>
         <div className="lead-metric"><span>Atualizado</span><strong className="text-[10px]">{new Date(brain.updated_at).toLocaleString('pt-BR')}</strong></div>
       </div>
-      <div>
-        <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1">Assuntos que os leads mais trazem</p>
-        <div className="flex flex-wrap gap-1">{(brain.subjects || []).map(s => <Badge key={s.term} variant="outline" className="text-[9px]">{s.term} · {s.count}</Badge>)}</div>
-      </div>
-      <div>
-        <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1">Fontes</p>
-        <div className="flex flex-wrap gap-1">{(brain.sources || []).map(s => <Badge key={s.source} variant="outline" className="text-[9px]">{s.source} · {s.count}</Badge>)}</div>
-      </div>
+      <details className="brain-details">
+        <summary>Assuntos que os leads mais trazem <span>({(brain.subjects || []).length})</span></summary>
+        <div className="flex flex-wrap gap-1 mt-2">{(brain.subjects || []).map(s => <Badge key={s.term} variant="outline" className="text-[9px]">{s.term} · {s.count}</Badge>)}</div>
+      </details>
+      <details className="brain-details">
+        <summary>Fontes de aquisição <span>({(brain.sources || []).length})</span></summary>
+        <div className="flex flex-wrap gap-1 mt-2">{(brain.sources || []).map(s => <Badge key={s.source} variant="outline" className="text-[9px]">{s.source} · {s.count}</Badge>)}</div>
+      </details>
       <div>
         <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1">Aprendizados que você ensinou</p>
         {(brain.notes_detail || []).map(n => (

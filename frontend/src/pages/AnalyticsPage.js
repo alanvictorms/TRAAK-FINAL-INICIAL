@@ -11,7 +11,8 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-import { BarChart3, Headphones, SlidersHorizontal } from 'lucide-react';
+import { BarChart3, Headphones, SlidersHorizontal, ListFilter, Filter } from 'lucide-react';
+import FunnelView from '@/components/analytics/FunnelView';
 import { toast } from 'sonner';
 
 const PERIODS = [['24h', 'Últimas 24h'], ['7d', '7 dias'], ['30d', '30 dias'], ['90d', '90 dias']];
@@ -21,7 +22,8 @@ const HOUR_OK = new Set(['24h', '7d']);
 
 const MONEY_KPIS = new Set(['ftd_value', 'deposits_value', 'net_deposits', 'avg_ftd']);
 const SERIES_METRICS = [
-  ['clicks', 'Cliques'], ['registrations', 'Cadastros'], ['ftds', 'FTDs'], ['deposits_value', 'Depósitos (R$)'],
+  ['clicks', 'Cliques', '#b7ff59'], ['bot_starts', 'StartBots', '#63d3b1'], ['channel_joins', 'Entradas no canal', '#4aa3d8'],
+  ['registrations', 'Cadastros', '#8fe388'], ['ftds', 'FTDs', '#d8c46a'], ['deposits_value', 'Depósitos (R$)', '#3fbf8f'],
 ];
 const SOURCE_LABELS = { meta: 'Meta Ads', tiktok: 'TikTok Ads', google: 'Google Ads', kwai: 'Kwai Ads', direct: 'Sem atribuição' };
 
@@ -50,7 +52,8 @@ function tickLabel(iso, granularity, tz) {
 function MediaTab() {
   const [filters, setFilters] = useState({ period: '30d', granularity: 'day', source: 'all' });
   const [data, setData] = useState(null);
-  const [metric, setMetric] = useState('clicks');
+  const [series, setSeries] = useState(['clicks', 'ftds']);
+  const [funnelView, setFunnelView] = useState('funnel');
   const [compare, setCompare] = useState(true);
   const [picking, setPicking] = useState(null);
 
@@ -68,8 +71,10 @@ function MediaTab() {
   }));
 
   const chart = useMemo(() => (data?.series || []).map(p => ({
-    t: p.t, atual: p[metric], anterior: p.previous?.[metric] ?? 0,
-  })), [data, metric]);
+    t: p.t,
+    ...Object.fromEntries(SERIES_METRICS.map(([key]) => [key, p[key] ?? 0])),
+    ...Object.fromEntries(SERIES_METRICS.map(([key]) => [`prev_${key}`, p.previous?.[key] ?? 0])),
+  })), [data]);
 
   const saveKpis = async () => {
     try {
@@ -85,7 +90,10 @@ function MediaTab() {
   const kpiByKey = Object.fromEntries(data.kpis.map(k => [k.key, k]));
   const sourceOptions = [...new Set([...data.by_source.map(s => s.source), ...(filters.source !== 'all' ? [filters.source] : [])])];
   const maxFunnel = Math.max(1, ...data.funnel.map(s => s.count));
-  const fmtAxis = v => (metric === 'deposits_value' ? money(v).replace(',00', '') : num(v));
+  const onlyMoney = series.length > 0 && series.every(key => key === 'deposits_value');
+  const fmtAxis = v => (onlyMoney ? money(v).replace(',00', '') : num(v));
+  const fmtValue = (value, name) => (String(name).includes('Depósitos') ? money(value) : num(value));
+  const toggleSeries = key => setSeries(list => (list.includes(key) ? list.filter(k => k !== key) : [...list, key]));
 
   return (
     <div className="space-y-4">
@@ -127,10 +135,14 @@ function MediaTab() {
       <div className="stat-card">
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <span className="text-sm font-medium">Evolução</span>
-          <Select value={metric} onValueChange={setMetric}>
-            <SelectTrigger className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>{SERIES_METRICS.map(([v, l]) => <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>)}</SelectContent>
-          </Select>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Métricas do gráfico">
+            {SERIES_METRICS.map(([key, label, color]) => (
+              <button key={key} type="button" onClick={() => toggleSeries(key)} data-testid={`series-${key}`}
+                className={`series-chip ${series.includes(key) ? 'is-on' : ''}`} style={series.includes(key) ? { '--chip': color } : undefined}>
+                <span style={{ background: color }} /> {label}
+              </button>
+            ))}
+          </div>
           <label className="flex items-center gap-2 text-xs text-muted-foreground ml-auto">
             <Switch checked={compare} onCheckedChange={setCompare} className="scale-75" /> Comparar com período anterior
           </label>
@@ -146,21 +158,35 @@ function MediaTab() {
               <Tooltip
                 contentStyle={{ background: 'hsl(var(--background))', border: '1px solid hsl(var(--border))', fontSize: 11 }}
                 labelFormatter={v => tickLabel(v, data.granularity, data.timezone)}
-                formatter={v => (metric === 'deposits_value' ? money(v) : num(v))}
+                formatter={fmtValue}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line type="monotone" dataKey="atual" name="Período atual" stroke="hsl(var(--chart-1))" strokeWidth={2} dot={false} />
-              {compare && (
-                <Line type="monotone" dataKey="anterior" name="Período anterior" stroke="hsl(var(--chart-5))" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
-              )}
+              {SERIES_METRICS.filter(([key]) => series.includes(key)).map(([key, label, color]) => (
+                <Line key={key} type="monotone" dataKey={key} name={label} stroke={color} strokeWidth={2} dot={false} />
+              ))}
+              {compare && SERIES_METRICS.filter(([key]) => series.includes(key)).map(([key, label, color]) => (
+                <Line key={`prev_${key}`} type="monotone" dataKey={`prev_${key}`} name={`${label} (anterior)`} stroke={color}
+                  strokeWidth={1.2} strokeDasharray="4 4" dot={false} opacity={0.55} />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       <div className="stat-card" data-testid="funnel">
-        <div className="text-sm font-medium mb-3">Funil</div>
-        <div className="space-y-2">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-sm font-medium">Funil</span>
+          <div className="view-switch">
+            <button type="button" className={funnelView === 'funnel' ? 'is-on' : ''} onClick={() => setFunnelView('funnel')} data-testid="funnel-view-funnel">
+              <Filter size={11} /> Funil
+            </button>
+            <button type="button" className={funnelView === 'list' ? 'is-on' : ''} onClick={() => setFunnelView('list')} data-testid="funnel-view-list">
+              <ListFilter size={11} /> Lista
+            </button>
+          </div>
+        </div>
+        {funnelView === 'funnel' && <FunnelView steps={data.funnel} compare={compare} />}
+        <div className="space-y-2" hidden={funnelView !== 'list'}>
           {data.funnel.map(step => (
             <div key={step.key} className="grid items-center gap-3" style={{ gridTemplateColumns: 'minmax(90px, 120px) 1fr minmax(120px, 190px)' }}>
               <span className="text-xs">{step.label}</span>

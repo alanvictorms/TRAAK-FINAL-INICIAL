@@ -850,3 +850,35 @@ a:hover { color: hsl(var(--primary)); }
 .brain-overlay { position: absolute; left: 14px; bottom: 12px; display: flex; flex-direction: column; pointer-events: none; }
 .brain-overlay strong { color: hsl(87 80% 72%); font-size: 20px; line-height: 1; }
 .brain-overlay span { color: hsl(160 14% 62%); font-size: 9px; text-transform: uppercase; letter-spacing: .8px; }
+
+/* ── Lista de conversas ocupa a coluna inteira ── */
+.inbox-conversation-list .stat-card { padding: 0; }
+.inbox-conversation-list [data-radix-scroll-area-viewport] > div { display: block !important; width: 100%; }
+
+/* ── Fundo do editor de automações ── */
+.flow-canvas .react-flow, .flow-canvas .react-flow__renderer { background: hsl(174 80% 3.5%); }
+.flow-canvas { --xy-background-color-default: hsl(174 80% 3.5%); }
+
+/* ── Séries do gráfico e alternância de visualização ── */
+.series-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid hsl(var(--border)); border-radius: 12px; color: hsl(var(--muted-foreground)); background: transparent; font-size: 9px; cursor: pointer; }
+.series-chip span { width: 7px; height: 7px; border-radius: 50%; opacity: .35; }
+.series-chip.is-on { color: hsl(var(--foreground)); border-color: color-mix(in srgb, var(--chip) 55%, transparent); background: color-mix(in srgb, var(--chip) 12%, transparent); }
+.series-chip.is-on span { opacity: 1; }
+.view-switch { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(165 40% 7%); }
+.view-switch button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 9px; border: 0; border-radius: 7px; color: hsl(var(--muted-foreground)); background: transparent; font-size: 10px; cursor: pointer; }
+.view-switch button.is-on { color: hsl(157 50% 12%); background: hsl(87 80% 72%); }
+
+/* ── Funil ── */
+.funnel-view { display: grid; grid-template-columns: minmax(0, 1fr) 190px; gap: 16px; align-items: center; }
+.funnel-tip { min-height: 88px; padding: 11px 12px; border: 1px solid hsl(var(--border)); border-radius: 10px; background: hsl(165 40% 7%); }
+@media (max-width: 720px) { .funnel-view { grid-template-columns: 1fr; } }
+
+/* ── Capacidades da integração ── */
+.capability-list { display: flex; flex-direction: column; gap: 5px; }
+.capability-list li { display: flex; align-items: center; gap: 7px; color: hsl(194 18% 80%); font-size: 10px; }
+.capability-list li::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: hsl(87 80% 72%); }
+
+/* ── Blocos recolhíveis do cérebro ── */
+.brain-details { border-top: 1px solid hsl(var(--border)); padding-top: 9px; }
+.brain-details > summary { display: flex; align-items: center; gap: 6px; color: hsl(160 18% 55%); font-size: 9px; font-weight: 700; letter-spacing: .8px; text-transform: uppercase; cursor: pointer; }
+.brain-details > summary span { color: hsl(var(--muted-foreground)); font-weight: 400; letter-spacing: 0; }

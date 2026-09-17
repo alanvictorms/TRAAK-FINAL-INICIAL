@@ -11,7 +11,8 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { Building2, CreditCard, Bot, Plus, Trash2 } from 'lucide-react';
+import { Building2, CreditCard, Bot, Plus, Trash2, Gauge, ShieldCheck, LifeBuoy } from 'lucide-react';
+import { AiOpsPanel, BillingPanel, PlansPanel, ReliabilityPanel, SupportPanel } from '@/components/platform/AdminPanels';
 import { toast } from 'sonner';
 
 export default function PlatformPage() {
@@ -19,6 +20,10 @@ export default function PlatformPage() {
   const getTab = () => {
     if (location.pathname.includes('/tenants')) return 'tenants';
     if (location.pathname.includes('/plans')) return 'plans';
+    if (location.pathname.includes('/billing')) return 'billing';
+    if (location.pathname.includes('/aiops')) return 'aiops';
+    if (location.pathname.includes('/reliability')) return 'reliability';
+    if (location.pathname.includes('/support')) return 'support';
     if (location.pathname.includes('/ai')) return 'ai';
     return 'overview';
   };
@@ -37,7 +42,7 @@ export default function PlatformPage() {
       try {
         if (tab === 'overview') { const { data } = await api.get('/platform'); setOverview(data); }
         if (tab === 'tenants') { const { data } = await api.get('/platform/tenants'); setTenants(data.items); }
-        if (tab === 'plans') { const { data } = await api.get('/platform/plans'); setPlans(data.items); }
+        if (tab === 'plans') { setPlans([]); }
         if (tab === 'ai') { const { data } = await api.get('/platform/ai'); setAiProviders(data.items); }
       } catch (err) {
         if (err.response?.status === 403) toast.error('Acesso negado — apenas administradores da plataforma.');
@@ -85,6 +90,10 @@ export default function PlatformPage() {
           <TabsTrigger value="overview" className="text-xs gap-1.5"><Building2 size={12} /> Visão geral</TabsTrigger>
           <TabsTrigger value="tenants" className="text-xs gap-1.5"><Building2 size={12} /> Tenants</TabsTrigger>
           <TabsTrigger value="plans" className="text-xs gap-1.5"><CreditCard size={12} /> Planos</TabsTrigger>
+          <TabsTrigger value="billing" className="text-xs gap-1.5"><Gauge size={12} /> Uso e faturas</TabsTrigger>
+          <TabsTrigger value="aiops" className="text-xs gap-1.5"><Bot size={12} /> IA da plataforma</TabsTrigger>
+          <TabsTrigger value="reliability" className="text-xs gap-1.5"><ShieldCheck size={12} /> Confiabilidade</TabsTrigger>
+          <TabsTrigger value="support" className="text-xs gap-1.5"><LifeBuoy size={12} /> Suporte</TabsTrigger>
           <TabsTrigger value="ai" className="text-xs gap-1.5"><Bot size={12} /> Provedores IA</TabsTrigger>
         </TabsList>
 
@@ -98,6 +107,11 @@ export default function PlatformPage() {
             </div>
           )}
         </TabsContent>
+
+        <TabsContent value="billing" className="mt-4">{tab === 'billing' && <BillingPanel />}</TabsContent>
+        <TabsContent value="aiops" className="mt-4">{tab === 'aiops' && <AiOpsPanel />}</TabsContent>
+        <TabsContent value="reliability" className="mt-4">{tab === 'reliability' && <ReliabilityPanel />}</TabsContent>
+        <TabsContent value="support" className="mt-4">{tab === 'support' && <SupportPanel />}</TabsContent>
 
         <TabsContent value="tenants" className="mt-4">
           <div className="stat-card" style={{ overflow: 'auto' }}>
@@ -122,19 +136,7 @@ export default function PlatformPage() {
           </div>
         </TabsContent>
 
-        <TabsContent value="plans" className="mt-4">
-          <div className="stat-card p-4">
-            <p className="text-xs text-muted-foreground">Planos são configuráveis. Preços e limites do protótipo são exemplos demonstrativos (D10).</p>
-            {plans.length === 0 ? (
-              <p className="text-xs text-muted-foreground mt-4">Nenhum plano cadastrado.</p>
-            ) : plans.map(p => (
-              <div key={p._id} className="mt-3 p-3 rounded-md bg-muted">
-                <div className="text-xs font-medium">{p.name}</div>
-                <div className="text-[10px] text-muted-foreground">{p.currency} {p.price}/mês</div>
-              </div>
-            ))}
-          </div>
-        </TabsContent>
+        <TabsContent value="plans" className="mt-4">{tab === 'plans' && <PlansPanel />}</TabsContent>
 
         <TabsContent value="ai" className="mt-4">
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>

@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import LeadDetailsPanel from '@/components/LeadDetailsPanel';
 import { QuickReplies, TagPicker, useInboxAudio } from '@/components/inbox/InboxExtras';
-import { MessageSquare, Send, User, Clock, Radio, PanelRightOpen, Lock, ArrowRightLeft, Sparkles } from 'lucide-react';
+import { AudioPanel } from '@/components/settings/WorkspacePanels';
+import { MessageSquare, Send, User, Clock, Radio, PanelRightOpen, Lock, ArrowRightLeft, Sparkles, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS = {
@@ -31,6 +32,7 @@ export default function InboxPage() {
   const [realtime, setRealtime] = useState('connecting');
   const [showLeadPanel, setShowLeadPanel] = useState(false);
   const [tagCatalog, setTagCatalog] = useState([]);
+  const [showAudio, setShowAudio] = useState(false);
   const playAlert = useInboxAudio();
   const [options, setOptions] = useState({ agents: [], close_reasons: [] });
   const [transfer, setTransfer] = useState(null);
@@ -150,7 +152,11 @@ export default function InboxPage() {
       <div className="inbox-conversation-list">
         <div className="flex items-center justify-between mb-2 px-1">
           <span className="text-[10px] font-medium">Conversas</span>
-          <span className={`text-[9px] flex items-center gap-1 ${realtime === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`}><Radio size={10} />{realtime === 'connected' ? 'Tempo real' : 'Reconectando'}</span>
+          <div className="flex items-center gap-2">
+            <span className={`text-[9px] flex items-center gap-1 ${realtime === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`}><Radio size={10} />{realtime === 'connected' ? 'Tempo real' : 'Reconectando'}</span>
+            <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Aviso sonoro" title="Aviso sonoro"
+              onClick={() => setShowAudio(true)} data-testid="open-audio"><Volume2 size={12} /></button>
+          </div>
         </div>
         <Input placeholder="Buscar conversa..." value={search} onChange={e => setSearch(e.target.value)} className="text-xs h-8 mb-2" data-testid="inbox-search" />
         <ScrollArea className="flex-1 stat-card p-0">
@@ -292,6 +298,13 @@ export default function InboxPage() {
         )}
       </div>
       {detail?.lead && showLeadPanel && <LeadDetailsPanel conversation={detail} onRefresh={() => fetchConversation(selected)} onArchive={openClose} onClose={() => setShowLeadPanel(false)} />}
+
+      <Dialog open={showAudio} onOpenChange={setShowAudio}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Aviso sonoro de mensagem nova</DialogTitle></DialogHeader>
+          <AudioPanel />
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!transfer} onOpenChange={o => { if (!o) setTransfer(null); }}>
         <DialogContent>

@@ -180,7 +180,8 @@ def _db():
 
 async def _config_for(agent):
     from routes.copilot_routes import get_ai_config
-    model = agent.get("model") or "claude-haiku-4-5-20251001"
+    routing = (await _db().platform_settings.find_one({"key": "ai_routing"}) or {}).get("value") or {}
+    model = agent.get("model") or (routing.get("agent") or {}).get("model") or "claude-haiku-4-5-20251001"
     provider = MODELS.get(model, ("openai", ""))[0]
     saved = await _db().ai_providers.find_one({"provider": provider, "status": "active"}, sort=[("created_at", -1)])
     if saved:
@@ -189,7 +190,24 @@ async def _config_for(agent):
     return await get_ai_config()
 
 
+async def platform_guardrails():
+    doc = await _db().platform_settings.find_one({"key": "ai_guardrails"})
+    return (doc or {}).get("value") or {}
+
+
 async def generate(agent, conversation, lead, history, incoming) -> str:
+    guardrails = await platform_guardrails()
+    cap = int(guardrails.get("monthly_token_cap") or 0)
+    if cap:
+        from admin_logic import estimate_tokens, month_range
+        start, end, _ = month_range(None)
+        spent = 0
+        async for run in _db().ai_agent_runs.find({"created_at": {"$gte": start, "$lt": end}}, {"incoming": 1, "reply": 1}):
+            spent += estimate_tokens(run.get("incoming", "")) + estimate_tokens(run.get("reply", ""))
+        if spent >= cap:
+            raise RuntimeError("limite mensal de IA da plataforma atingido")
+    if guardrails.get("max_reply_words"):
+        agent = {**agent, "max_words": min(int(agent.get("max_words") or 100), int(guardrails["max_reply_words"]))}
     config = await _config_for(agent)
     if not config:
         raise RuntimeError("nenhum provedor de IA configurado")
@@ -200,8 +218,12 @@ async def generate(agent, conversation, lead, history, incoming) -> str:
                    system_message=system_prompt(agent, lead, brain, memory)).with_model(config["provider"], config["model"])
     lines = [f"{'Cliente' if m.get('direction') == 'inbound' else 'Atendimento'}: {m.get('content')}" for m in history]
     lines.append(f"Cliente: {incoming}")
-    reply = await chat.send_message(UserMessage(text="\n".join(lines[-MAX_HISTORY:])))
-    return (reply or "").strip()
+    reply = ((await chat.send_message(UserMessage(text="\n".join(lines[-MAX_HISTORY:])))) or "").strip()
+    blocked = [t for t in guardrails.get("blocked_terms") or [] if t and t.lower() in reply.lower()]
+    if blocked:
+        # Termo proibido pela plataforma: melhor passar para humano do que enviar.
+        raise RuntimeError(f"resposta bloqueada pelo guardrail: {', '.join(blocked)}")
+    return reply
 
 
 async def _context(agent, conversation, player, text, now):

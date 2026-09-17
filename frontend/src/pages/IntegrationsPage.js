@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Search, Radar, Settings, TestTube, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import IntegrationDrawer from '@/components/integrations/IntegrationDrawer';
 
 const PROVIDERS = [
   { id: 'tap', name: 'TAP', category: 'revenue', desc: 'Revenue provider — postback S2S',
@@ -373,84 +374,14 @@ export default function IntegrationsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Detail Dialog */}
-      <Dialog open={!!showDetail} onOpenChange={() => setShowDetail(null)}>
-        <DialogContent className="max-w-lg" data-testid="integration-detail-dialog">
-          <DialogHeader><DialogTitle>{showDetail?.name}</DialogTitle></DialogHeader>
-          {showDetail && (() => {
-            const prov = PROVIDERS.find(p => p.id === showDetail.provider);
-            return (
-              <Tabs defaultValue="overview">
-                <TabsList className="w-full">
-                  <TabsTrigger value="overview" className="text-xs flex-1">Visão</TabsTrigger>
-                  <TabsTrigger value="config" className="text-xs flex-1">Credenciais</TabsTrigger>
-                  <TabsTrigger value="capabilities" className="text-xs flex-1">Capacidades</TabsTrigger>
-                  <TabsTrigger value="logs" className="text-xs flex-1">Logs</TabsTrigger>
-                </TabsList>
-                <TabsContent value="overview" className="space-y-3 mt-3">
-                  <div className="text-xs"><span className="text-muted-foreground">Provedor:</span> {showDetail.provider}</div>
-                  <div className="text-xs"><span className="text-muted-foreground">Categoria:</span> {showDetail.category}</div>
-                  <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{statusLabel(showDetail.status)}</Badge></div>
-                  <div className="text-xs"><span className="text-muted-foreground">Criada:</span> {new Date(showDetail.created_at).toLocaleString('pt-BR')}</div>
-                  {showDetail.last_test && <div className="text-xs"><span className="text-muted-foreground">Último teste:</span> {showDetail.last_test.status} em {new Date(showDetail.last_test.tested_at).toLocaleString('pt-BR')}</div>}
-                  {showDetail.webhook_error && <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-3"><span className="font-medium">Erro no webhook:</span> {showDetail.webhook_error}</div>}
-                  {prov?.docs && <div className="text-[10px] text-muted-foreground bg-muted p-3 rounded-md mt-2">{prov.docs}</div>}
-                </TabsContent>
-                <TabsContent value="config" className="mt-3 space-y-2">
-                  {prov?.fields ? prov.fields.map(f => (
-                    <div key={f.key} className="text-xs">
-                      <span className="text-muted-foreground">{f.label}:</span>{' '}
-                      <span className="font-mono">{showDetail.credentials_masked?.[f.key] || showDetail.credentials?.[f.key] || '—'}</span>
-                    </div>
-                  )) : (
-                    <pre className="text-[10px] bg-muted p-3 rounded-md overflow-auto">{JSON.stringify(showDetail.credentials_masked || showDetail.credentials, null, 2)}</pre>
-                  )}
-                  {showDetail.provider === 'tap' && (
-                    <div className="stat-card p-3 mt-3">
-                      <p className="text-[10px] font-medium text-foreground mb-1">Postback URL</p>
-                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all" data-testid="tap-postback-url">
-                        {showDetail.config?.postback_url || 'Gerando…'}
-                      </code>
-                      {showDetail.config?.postback_url && (
-                        <Button variant="outline" size="sm" className="mt-2 text-xs h-7" onClick={() => { navigator.clipboard.writeText(showDetail.config.postback_url); toast.success('URL copiada'); }}>Copiar</Button>
-                      )}
-                      <p className="text-[9px] text-muted-foreground mt-1">URL exclusiva desta integração — o token nela autentica cada postback. Não compartilhe. Envie POST JSON com event, transaction_id, customer_id, click_id e amount.</p>
-                    </div>
-                  )}
-                  {['telegram', 'meta', 'whatsapp'].includes(showDetail.provider) && (
-                    <div className="stat-card p-3 mt-3">
-                      <p className="text-[10px] font-medium text-foreground mb-1">Webhook URL</p>
-                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">{showDetail.config?.webhook_url || `${window.location.origin}/api/webhooks/${showDetail.provider === 'telegram' ? 'telegram' : 'meta'}/${showDetail._id}`}</code>
-                      {showDetail.provider === 'telegram' && <Button size="sm" className="mt-3 text-xs" onClick={() => handleRegisterWebhook(showDetail._id)}>Registrar no Telegram</Button>}
-                      {showDetail.provider === 'telegram' && <p className="text-[9px] text-muted-foreground mt-2">Em grupos, desative o Privacy Mode no @BotFather para o bot receber mensagens comuns. Comandos, menções e respostas ao bot funcionam com o modo ativo.</p>}
-                    </div>
-                  )}
-                  {showDetail.provider === 'meta' && (
-                    <div className="stat-card p-3 mt-3">
-                      <p className="text-[10px] font-medium text-foreground mb-1">Endpoint CAPI</p>
-                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">{showDetail.config?.capi_url || `${window.location.origin}/api/webhooks/meta/${showDetail._id}/capi`}</code>
-                      <p className="text-[9px] text-muted-foreground mt-1">Eventos server-side são encaminhados à Meta e registrados no Signal Ledger.</p>
-                    </div>
-                  )}
-                </TabsContent>
-                <TabsContent value="capabilities" className="mt-3">
-                  <div className="flex flex-wrap gap-2">
-                    {(showDetail.capabilities || prov?.capabilities || []).map(c => (
-                      <Badge key={c} variant="outline" className="text-[9px]">{c}</Badge>
-                    ))}
-                  </div>
-                  {(!showDetail.capabilities || showDetail.capabilities.length === 0) && (!prov?.capabilities || prov.capabilities.length === 0) && (
-                    <p className="text-xs text-muted-foreground">Nenhuma capacidade registrada.</p>
-                  )}
-                </TabsContent>
-                <TabsContent value="logs" className="mt-3">
-                  <p className="text-xs text-muted-foreground">Logs de atividade aparecerão aqui conforme eventos forem processados.</p>
-                </TabsContent>
-              </Tabs>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+      <IntegrationDrawer
+        integration={showDetail}
+        provider={PROVIDERS.find(p => p.id === showDetail?.provider)}
+        onClose={removed => { setShowDetail(null); if (removed === true) load(); }}
+        onChanged={async id => { load(); const { data } = await api.get(`/integrations/${id}`); setShowDetail(data); }}
+        onRegisterWebhook={handleRegisterWebhook}
+      />
+
     </div>
   );
 }

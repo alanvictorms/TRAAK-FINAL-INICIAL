@@ -83,10 +83,16 @@ function AppRoutes() {
         <Route path="settings/billing" element={<SettingsPage />} />
         <Route path="settings/notifications" element={<SettingsPage />} />
         <Route path="settings/audit" element={<SettingsPage />} />
+        <Route path="settings/tags" element={<SettingsPage />} />
+        <Route path="settings/quick-replies" element={<SettingsPage />} />
         <Route path="platform" element={<PlatformPage />} />
         <Route path="platform/tenants" element={<PlatformPage />} />
         <Route path="platform/plans" element={<PlatformPage />} />
         <Route path="platform/ai" element={<PlatformPage />} />
+        <Route path="platform/billing" element={<PlatformPage />} />
+        <Route path="platform/aiops" element={<PlatformPage />} />
+        <Route path="platform/reliability" element={<PlatformPage />} />
+        <Route path="platform/support" element={<PlatformPage />} />
         <Route path="roadmap" element={<RoadmapPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/command" replace />} />
