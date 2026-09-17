@@ -358,6 +358,11 @@ async def ingest_incoming_message(
     await _start_automations(
         workspace_id, integration_id, conversation_id, message_id, str(player["_id"])
     )
+    try:
+        from ai_agent import on_incoming
+        await on_incoming(conversation, player, content or "")
+    except Exception as exc:  # noqa: BLE001 — a mensagem do lead não se perde por causa da IA
+        logger.warning("agente de IA não respondeu: %s", exc)
     await inbox_events.publish(workspace_id, {
         "type": "message.received",
         "conversation_id": conversation_id,

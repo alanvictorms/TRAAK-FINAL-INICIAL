@@ -24,6 +24,7 @@ import MonitoringPage from '@/pages/MonitoringPage';
 import IdentityPage from '@/pages/IdentityPage';
 import SourcesPage from '@/pages/SourcesPage';
 import RoadmapPage from '@/pages/RoadmapPage';
+import AIAgentsPage from '@/pages/AIAgentsPage';
 import '@/App.css';
 
 function ProtectedRoute({ children }) {
@@ -66,6 +67,7 @@ function AppRoutes() {
         <Route path="inbox" element={<InboxPage />} />
         <Route path="inbox/:id" element={<InboxPage />} />
         <Route path="automations" element={<AutomationsPage />} />
+        <Route path="ai-agents" element={<AIAgentsPage />} />
         <Route path="automations/:id" element={<AutomationsPage />} />
         <Route path="segments" element={<SegmentsPage />} />
         <Route path="disparos" element={<DisparosPage />} />

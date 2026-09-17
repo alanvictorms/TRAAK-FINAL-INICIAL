@@ -42,6 +42,7 @@ const navGroups = [
     label: 'OPERATE', items: [
       { to: '/inbox', icon: MessageSquare, label: 'Inbox' },
       { to: '/automations', icon: Workflow, label: 'Automações' },
+      { to: '/ai-agents', icon: Bot, label: 'Agentes de IA' },
       { to: '/segments', icon: Target, label: 'Segmentos' },
       { to: '/disparos', icon: Send, label: 'Disparos' },
       { to: '/media', icon: Megaphone, label: 'Campanhas' },

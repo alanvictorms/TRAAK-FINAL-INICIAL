@@ -113,6 +113,8 @@ const PROVIDERS = [
   },
 ];
 
+const CATEGORY_LABELS = { revenue: 'Receita', acquisition: 'Aquisição', messaging: 'Mensageria', infra: 'Infra', ia: 'IA' };
+const STATUS_LABELS = { active: 'Conectado', configured: 'Configurado', connected: 'Conectado', error: 'Com erro', restricted: 'Restrito' };
 const statusColors = { active: 'badge-success', configured: 'badge-info', connected: 'badge-info', available: '', error: 'badge-error', restricted: 'badge-warning' };
 
 export default function IntegrationsPage() {
@@ -258,47 +260,39 @@ export default function IntegrationsPage() {
         </Select>
       </div>
 
-      <div className="stat-card" style={{ overflow: 'auto' }}>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">Provedor</TableHead>
-              <TableHead className="text-xs">Categoria</TableHead>
-              <TableHead className="text-xs">Status</TableHead>
-              <TableHead className="text-xs">Último teste</TableHead>
-              <TableHead className="text-xs text-right">Ações</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5}>
-                  <div className="empty-state">
-                    <Radar size={32} />
-                    <h3>Nenhuma integração</h3>
-                    <p>Conecte seu primeiro provedor para começar a operar.</p>
+      <div className="catalog-grid" data-testid="integrations-catalog">
+        {PROVIDERS.filter(p => (catFilter === 'all' || p.category === catFilter)
+          && `${p.name} ${p.desc}`.toLowerCase().includes(search.toLowerCase())).map(provider => {
+          const connected = items.filter(i => i.provider === provider.id);
+          if (statusFilter !== 'all' && !connected.some(i => i.status === statusFilter)) return null;
+          const first = connected[0];
+          return (
+            <div key={provider.id} className="stat-card catalog-card" data-testid={`catalog-${provider.id}`}>
+              <div className="catalog-card-top">
+                <span className={`catalog-icon cat-${provider.category}`}><Radar size={17} /></span>
+                <Badge variant="outline" className="catalog-category">{CATEGORY_LABELS[provider.category] || provider.category}</Badge>
+              </div>
+              <strong className="catalog-name">{provider.name}</strong>
+              <p className="catalog-desc">{provider.desc}</p>
+              <div className="catalog-card-foot">
+                <span className={`catalog-status ${first ? 'is-on' : ''}`}>
+                  {first ? `${connected.length > 1 ? `${connected.length} conexões · ` : ''}${STATUS_LABELS[first.status] || first.status}` : 'Não conectado'}
+                </span>
+                {first ? (
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openDetail(first)} data-testid={`config-${first._id}`} aria-label="Configurar"><Settings size={13} /></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleTest(first._id)} data-testid={`test-${first._id}`} aria-label="Testar"><TestTube size={13} /></Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(first._id)} aria-label="Remover"><Trash2 size={13} /></Button>
                   </div>
-                </TableCell>
-              </TableRow>
-            ) : items.map(item => (
-              <TableRow key={item._id} data-testid={`integration-row-${item._id}`}>
-                <TableCell className="text-xs font-medium">{item.name}</TableCell>
-                <TableCell><Badge variant="outline" className="text-[9px]">{item.category}</Badge></TableCell>
-                <TableCell><Badge className={`text-[9px] ${statusColors[item.status] || ''}`}>{item.status}</Badge></TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {item.last_test ? item.last_test.status : '—'}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end' }}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openDetail(item)} data-testid={`config-${item._id}`}><Settings size={13} /></Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleTest(item._id)} data-testid={`test-${item._id}`}><TestTube size={13} /></Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(item._id)}><Trash2 size={13} /></Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                ) : (
+                  <Button size="sm" className="h-7 text-[10px]" onClick={() => { setForm({ provider: provider.id }); setCredFields({}); setShowCreate(true); }} data-testid={`connect-${provider.id}`}>
+                    Conectar
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>

@@ -160,6 +160,21 @@ async def get_conversation(conversation_id: str, request: Request):
     return doc
 
 
+async def _known_tags(workspace_id, tags):
+    """Devolve (etiquetas válidas na grafia do catálogo, desconhecidas)."""
+    if not isinstance(tags, list):
+        raise HTTPException(400, "Envie tags como lista")
+    catalog = {t["name"].lower(): t["name"] async for t in db.workspace_tags.find({"workspace_id": workspace_id}, {"name": 1})}
+    clean, unknown = [], []
+    for raw in tags:
+        name = catalog.get(str(raw).strip().lower())
+        if not name:
+            unknown.append(str(raw).strip()[:40])
+        elif name not in clean:
+            clean.append(name)
+    return clean, unknown
+
+
 @router.put("/inbox/{conversation_id}/lead")
 async def update_conversation_lead(conversation_id: str, body: LeadDetailUpdate, request: Request):
     user = await get_current_user(request)
@@ -170,6 +185,11 @@ async def update_conversation_lead(conversation_id: str, body: LeadDetailUpdate,
     })
     if not conversation or not ObjectId.is_valid(conversation.get("player_id", "")):
         raise HTTPException(404, "Lead da conversa não encontrado")
+    if body.tags is not None:
+        clean, unknown = await _known_tags(user["workspace_id"], body.tags)
+        if unknown:
+            raise HTTPException(400, f"Etiqueta não cadastrada na workspace: {', '.join(unknown)}")
+        body.tags = clean
     update = {"updated_at": datetime.now(timezone.utc)}
     for field in ("name", "status", "pipeline_stage", "expert_name", "budget", "tags", "internal_notes", "blocked"):
         value = getattr(body, field)
@@ -408,11 +428,9 @@ async def set_conversation_tags(conversation_id: str, request: Request):
     tags = body.get("tags")
     if not isinstance(tags, list):
         raise HTTPException(400, "Envie tags como lista")
-    clean = []
-    for t in tags:
-        t = str(t).strip().lower()[:40]
-        if t and t not in clean:
-            clean.append(t)
+    clean, unknown = await _known_tags(user["workspace_id"], tags)
+    if unknown:
+        raise HTTPException(400, f"Etiqueta não cadastrada na workspace: {', '.join(unknown)}")
     if len(clean) > 20:
         raise HTTPException(400, "No máximo 20 etiquetas por conversa")
     await db.conversations.update_one({"_id": conv["_id"]}, {"$set": {"tags": clean, "updated_at": datetime.now(timezone.utc)}})

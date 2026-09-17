@@ -10,7 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import LeadDetailsPanel from '@/components/LeadDetailsPanel';
-import { MessageSquare, Send, User, Clock, Radio, PanelRightOpen, Lock, ArrowRightLeft, X, Tag } from 'lucide-react';
+import { QuickReplies, TagPicker, useInboxAudio } from '@/components/inbox/InboxExtras';
+import { MessageSquare, Send, User, Clock, Radio, PanelRightOpen, Lock, ArrowRightLeft, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 
 const STATUS = {
@@ -18,35 +19,6 @@ const STATUS = {
   active: ['Em atendimento', 'badge-info'],
   resolved: ['Encerrada', 'badge-success'],
 };
-
-function TagEditor({ tags, onChange }) {
-  const [draft, setDraft] = useState('');
-  const add = () => {
-    const t = draft.trim().toLowerCase();
-    if (t && !tags.includes(t)) onChange([...tags, t]);
-    setDraft('');
-  };
-  return (
-    <div className="flex flex-wrap items-center gap-1 px-3 py-2 border-b border-border" data-testid="conversation-tags">
-      <Tag size={11} className="text-muted-foreground" />
-      {tags.map(t => (
-        <Badge key={t} variant="outline" className="text-[9px] gap-1 pr-1">
-          {t}
-          <button type="button" aria-label={`Remover etiqueta ${t}`} onClick={() => onChange(tags.filter(x => x !== t))}><X size={9} /></button>
-        </Badge>
-      ))}
-      <input
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); } }}
-        onBlur={add}
-        placeholder={tags.length ? '' : 'Adicionar etiqueta…'}
-        className="bg-transparent text-[10px] outline-none min-w-[90px] flex-1"
-        aria-label="Nova etiqueta"
-      />
-    </div>
-  );
-}
 
 export default function InboxPage() {
   const { id: routeId } = useParams();
@@ -57,7 +29,9 @@ export default function InboxPage() {
   const [mode, setMode] = useState('reply');
   const [search, setSearch] = useState('');
   const [realtime, setRealtime] = useState('connecting');
-  const [showLeadPanel, setShowLeadPanel] = useState(true);
+  const [showLeadPanel, setShowLeadPanel] = useState(false);
+  const [tagCatalog, setTagCatalog] = useState([]);
+  const playAlert = useInboxAudio();
   const [options, setOptions] = useState({ agents: [], close_reasons: [] });
   const [transfer, setTransfer] = useState(null);
   const [closing, setClosing] = useState(null);
@@ -74,6 +48,7 @@ export default function InboxPage() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => { api.get('/inbox/meta/options').then(r => setOptions(r.data)).catch(() => {}); }, []);
+  useEffect(() => { api.get('/tags').then(r => setTagCatalog(r.data.items)).catch(() => {}); }, []);
 
   const fetchConversation = useCallback(async (id) => {
     try {
@@ -99,14 +74,22 @@ export default function InboxPage() {
       load();
       try {
         const payload = JSON.parse(event.data);
+        if (payload.type === 'message.received') playAlert();
         if (selected && payload.conversation_id === selected) fetchConversation(selected);
       } catch { /* evento sem JSON */ }
     });
     stream.onerror = () => setRealtime('reconnecting');
     return () => stream.close();
-  }, [load, selected, fetchConversation]);
+  }, [load, selected, fetchConversation, playAlert]);
 
-  const open = (id) => { setShowLeadPanel(true); navigate(`/inbox/${id}`); };
+  const open = (id) => navigate(`/inbox/${id}`);
+
+  const sendSuggestion = async (content) => {
+    try {
+      await api.post(`/inbox/${selected}/messages`, { content, type: 'reply' });
+      fetchConversation(selected);
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+  };
 
   const sendMessage = async (e) => {
     e.preventDefault();
@@ -237,7 +220,7 @@ export default function InboxPage() {
               <Button size="icon" variant={showLeadPanel ? 'secondary' : 'ghost'} className="h-8 w-8" onClick={() => setShowLeadPanel(v => !v)} aria-label="Mostrar painel de detalhes" title="Mostrar painel de detalhes"><PanelRightOpen size={14} /></Button>
             </div>
 
-            <TagEditor tags={detail.tags || []} onChange={saveTags} />
+            <TagPicker tags={detail.tags || []} catalog={tagCatalog} onChange={saveTags} />
 
             <ScrollArea className="flex-1 p-3">
               <div className="space-y-3">
@@ -245,6 +228,18 @@ export default function InboxPage() {
                   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                   if (msg.type === 'system') {
                     return <p key={msg._id} className="text-center text-[10px] text-muted-foreground">{msg.content} · {time}</p>;
+                  }
+                  if (msg.type === 'ai_agent' && msg.suggestion) {
+                    return (
+                      <div key={msg._id} className="ai-suggestion" data-testid="ai-suggestion">
+                        <div className="ai-suggestion-head"><Sparkles size={11} /> Sugestão da IA · {msg.sender_name} · {time}</div>
+                        <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                        <div className="flex gap-2 mt-2">
+                          <Button size="sm" className="h-6 text-[10px]" onClick={() => sendSuggestion(msg.content)} data-testid="send-suggestion">Enviar</Button>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px]" onClick={() => setMessage(msg.content)}>Editar antes</Button>
+                        </div>
+                      </div>
+                    );
                   }
                   if (msg.direction === 'internal') {
                     return (
@@ -284,6 +279,7 @@ export default function InboxPage() {
                   </button>
                 ))}
                 {mode === 'internal_note' && <span className="text-[10px] text-muted-foreground ml-auto self-center">visível só para a equipe</span>}
+                {mode === 'reply' && <span className="ml-auto"><QuickReplies conversationId={selected} onPick={text => setMessage(m => (m ? `${m} ${text}` : text))} /></span>}
               </div>
               <div className="flex gap-2">
                 <Textarea className="text-xs flex-1 min-h-[36px] max-h-[80px]" rows={1} value={message} onChange={e => setMessage(e.target.value)}

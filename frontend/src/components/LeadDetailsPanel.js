@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Archive, Ban, Check, ChevronDown, CircleDollarSign, ClipboardList,
   Mail, MapPin, Phone, Plus, Tags, X,
@@ -17,10 +18,16 @@ const initials = name => (name || 'Lead').split(/\s+/).slice(0, 2).map(part => p
 
 export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, onClose }) {
   const [lead, setLead] = useState(conversation.lead || {});
-  const [tag, setTag] = useState('');
+  const [catalog, setCatalog] = useState([]);
+  const [agents, setAgents] = useState([]);
+  const [tagOpen, setTagOpen] = useState(false);
   const [task, setTask] = useState('');
   const [saving, setSaving] = useState(false);
   useEffect(() => setLead(conversation.lead || {}), [conversation]);
+  useEffect(() => {
+    api.get('/tags').then(r => setCatalog(r.data.items)).catch(() => {});
+    api.get('/inbox/meta/options').then(r => setAgents(r.data.agents || [])).catch(() => {});
+  }, []);
 
   const identifier = useMemo(() => {
     if (lead.phone) return lead.phone;
@@ -40,12 +47,19 @@ export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, o
     } finally { setSaving(false); }
   };
 
-  const addTag = async event => {
-    event.preventDefault();
-    const value = tag.trim();
+  const addTag = async value => {
+    setTagOpen(false);
     if (!value || (lead.tags || []).includes(value)) return;
     await updateLead({ tags: [...(lead.tags || []), value] });
-    setTag('');
+  };
+
+  // Trocar o responsável é transferir a conversa: quem recebe precisa saber.
+  const assign = async userId => {
+    try {
+      const { data } = await api.post(`/inbox/${conversation._id}/assign`, userId === 'none' ? {} : { user_id: userId });
+      toast.success(`${data.detail}: ${data.assigned_name}`);
+      await onRefresh();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao transferir'); }
   };
 
   const removeTag = value => updateLead({ tags: (lead.tags || []).filter(item => item !== value) });
@@ -91,7 +105,13 @@ export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, o
       <PanelSection title="Status">
         <div className="lead-grid-two">
           <Select value={lead.pipeline_stage || 'Sem etapa'} onValueChange={value => updateLead({ pipeline_stage: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Sem etapa">Sem etapa</SelectItem><SelectItem value="Novo lead">Novo lead</SelectItem><SelectItem value="Em atendimento">Em atendimento</SelectItem><SelectItem value="Qualificado">Qualificado</SelectItem><SelectItem value="Convertido">Convertido</SelectItem></SelectContent></Select>
-          <Input placeholder="Responsável" value={lead.expert_name || ''} onChange={event => setLead(current => ({ ...current, expert_name: event.target.value }))} onBlur={event => event.target.value !== conversation.lead?.expert_name && updateLead({ expert_name: event.target.value })} />
+          <Select value={conversation.assigned_to || 'none'} onValueChange={assign}>
+            <SelectTrigger data-testid="lead-assignee"><SelectValue placeholder="Responsável" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none" className="text-[10px]">Não atribuído</SelectItem>
+              {agents.map(a => <SelectItem key={a.id} value={a.id} className="text-[10px]">{a.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </PanelSection>
 
@@ -107,7 +127,20 @@ export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, o
 
       <PanelSection title="Tags">
         <div className="lead-tags">{(lead.tags || []).map(value => <button type="button" key={value} onClick={() => removeTag(value)}><Tags size={10} />{value}<X size={9} /></button>)}</div>
-        <form className="lead-inline-form" onSubmit={addTag}><Input value={tag} onChange={event => setTag(event.target.value)} placeholder="Adicionar tag" /><Button type="submit" size="icon" variant="outline"><Plus size={13} /></Button></form>
+        <Popover open={tagOpen} onOpenChange={setTagOpen}>
+          <PopoverTrigger asChild>
+            <Button type="button" size="sm" variant="outline" className="w-full text-[10px] h-8" data-testid="lead-add-tag">
+              <Plus size={12} className="mr-1" /> {catalog.length ? 'Adicionar tag' : 'Cadastre tags em Configurações'}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-1" align="start">
+            {catalog.filter(t => !(lead.tags || []).includes(t.name)).map(t => (
+              <button key={t._id} type="button" className="block w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted" onClick={() => addTag(t.name)}>
+                <span className={`tag-dot tag-${t.color}`} />{t.name}
+              </button>
+            ))}
+          </PopoverContent>
+        </Popover>
       </PanelSection>
 
       <PanelSection title={`Tarefas · ${(lead.tasks || []).filter(item => !item.completed).length}`}>
@@ -139,8 +172,14 @@ export default function LeadDetailsPanel({ conversation, onRefresh, onArchive, o
   );
 }
 
-function PanelSection({ title, children }) {
-  return <section className="lead-panel-section"><header><span>{title}</span><ChevronDown size={12} /></header>{children}</section>;
+function PanelSection({ title, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={`lead-panel-section ${open ? 'is-open' : ''}`}>
+      <header><button type="button" onClick={() => setOpen(v => !v)} aria-expanded={open}><span>{title}</span><ChevronDown size={12} /></button></header>
+      {open && children}
+    </section>
+  );
 }
 
 function DetailRow({ icon: Icon, label, value, accent }) {

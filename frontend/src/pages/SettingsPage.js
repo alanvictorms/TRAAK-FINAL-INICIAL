@@ -10,9 +10,10 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Settings, UsersRound, Key, ClipboardList, Plus, Trash2, CreditCard, Bell } from 'lucide-react';
+import { Settings, UsersRound, Key, ClipboardList, Plus, Trash2, CreditCard, Bell, Tags, Zap, Volume2 } from 'lucide-react';
 import BillingPanel from '@/components/settings/BillingPanel';
 import NotificationsPanel from '@/components/settings/NotificationsPanel';
+import { AudioPanel, QuickRepliesPanel, TagsPanel } from '@/components/settings/WorkspacePanels';
 import { toast } from 'sonner';
 
 export default function SettingsPage() {
@@ -118,7 +119,10 @@ export default function SettingsPage() {
           <TabsTrigger value="team" className="text-xs gap-1.5"><UsersRound size={12} /> Equipe</TabsTrigger>
           <TabsTrigger value="api" className="text-xs gap-1.5"><Key size={12} /> API</TabsTrigger>
           <TabsTrigger value="billing" className="text-xs gap-1.5"><CreditCard size={12} /> Faturamento</TabsTrigger>
+          <TabsTrigger value="tags" className="text-xs gap-1.5"><Tags size={12} /> Etiquetas</TabsTrigger>
+          <TabsTrigger value="quick-replies" className="text-xs gap-1.5"><Zap size={12} /> Respostas rápidas</TabsTrigger>
           <TabsTrigger value="notifications" className="text-xs gap-1.5"><Bell size={12} /> Notificações</TabsTrigger>
+          <TabsTrigger value="audio" className="text-xs gap-1.5"><Volume2 size={12} /> Som</TabsTrigger>
           <TabsTrigger value="audit" className="text-xs gap-1.5"><ClipboardList size={12} /> Auditoria</TabsTrigger>
         </TabsList>
 
@@ -234,6 +238,9 @@ export default function SettingsPage() {
 
         <TabsContent value="billing" className="mt-4">{tab === 'billing' && <BillingPanel />}</TabsContent>
         <TabsContent value="notifications" className="mt-4">{tab === 'notifications' && <NotificationsPanel />}</TabsContent>
+        <TabsContent value="tags" className="mt-4">{tab === 'tags' && <TagsPanel />}</TabsContent>
+        <TabsContent value="quick-replies" className="mt-4">{tab === 'quick-replies' && <QuickRepliesPanel />}</TabsContent>
+        <TabsContent value="audio" className="mt-4">{tab === 'audio' && <AudioPanel />}</TabsContent>
 
         <TabsContent value="audit" className="mt-4">
           <div className="stat-card" style={{ overflow: 'auto' }}>
