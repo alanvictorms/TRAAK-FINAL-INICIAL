@@ -70,7 +70,11 @@ async def _get(client: httpx.AsyncClient, path: str, params: Dict[str, Any]) -> 
     for _ in range(10):
         response = await client.get(url, params=params)
         if response.status_code >= 400:
-            detail = (response.json().get("error") or {}).get("message") if "json" in response.headers.get("content-type", "") else response.text
+            try:
+                detail = (response.json().get("error") or {}).get("message")
+            except ValueError:
+                # A Meta devolve HTML quando a conta não existe: o texto cru não ajuda ninguém.
+                detail = "conta de anúncios não encontrada ou sem acesso para este token"
             raise RuntimeError(f"Meta respondeu {response.status_code}: {str(detail)[:200]}")
         payload = response.json()
         out.extend(payload.get("data") or [])
