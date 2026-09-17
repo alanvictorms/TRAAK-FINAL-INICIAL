@@ -260,7 +260,7 @@ export default function ReportsPage() {
           <div className="max-h-80 overflow-auto">
             {history?.items.length === 0 && <p className="text-xs text-muted-foreground">Ainda não executado.</p>}
             {(history?.items || []).map(s => (
-              <button key={s._id} type="button" className="block w-full text-left text-xs py-1.5 border-b border-border hover:underline"
+              <button key={s._id} type="button" className="block w-full text-left text-xs py-1.5 border-b border-border hover:text-primary"
                 onClick={() => openSnapshot(history.report._id, s._id)}>
                 {new Date(s.generated_at).toLocaleString('pt-BR')} <span className="text-muted-foreground">· {s.trigger === 'scheduled' ? 'agendado' : 'manual'}</span>
               </button>

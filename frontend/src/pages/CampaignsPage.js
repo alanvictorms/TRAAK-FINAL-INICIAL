@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { statusLabel } from '@/lib/labels';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -85,7 +86,7 @@ export default function CampaignsPage() {
               <TableRow key={c._id}>
                 <TableCell className="text-xs font-medium">{c.name}</TableCell>
                 <TableCell><Badge variant="outline" className="text-[9px]">{c.platform}</Badge></TableCell>
-                <TableCell><Badge className={`text-[9px] ${c.status === 'active' ? 'badge-success' : c.status === 'paused' ? 'badge-warning' : ''}`}>{c.status}</Badge></TableCell>
+                <TableCell><Badge className={`text-[9px] ${c.status === 'active' ? 'badge-success' : c.status === 'paused' ? 'badge-warning' : ''}`}>{statusLabel(c.status)}</Badge></TableCell>
                 <TableCell className="text-xs">{c.budget ? `R$ ${c.budget.toFixed(2)}` : '—'}</TableCell>
                 <TableCell className="text-xs">R$ {(c.metrics?.spend || 0).toFixed(2)}</TableCell>
                 <TableCell className="text-xs">{c.metrics?.clicks || 0}</TableCell>

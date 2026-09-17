@@ -74,7 +74,7 @@ function Chips({ values = [], onChange, placeholder, testid }) {
 
 function AgentForm({ agent, options, onSaved, onClose }) {
   const [form, setForm] = useState(agent || { ...EMPTY, prompt: options.default_prompt || '' });
-  const [tab, setTab] = useState('config');
+  const [tab, setTab] = useState(agent?._tab || 'config');
   const [chat, setChat] = useState({ input: '', history: [] });
   const [runs, setRuns] = useState([]);
   const set = patch => setForm(f => ({ ...f, ...patch }));
@@ -122,8 +122,8 @@ function AgentForm({ agent, options, onSaved, onClose }) {
               <Label className="text-xs">Avatar</Label>
               <div className="agent-avatars">
                 {[0, 1, 2, 3].map(i => (
-                  <button key={i} type="button" className={`agent-avatar av-${i} ${form.avatar === i ? 'is-selected' : ''}`} aria-label={`Avatar ${i + 1}`} onClick={() => set({ avatar: i })}>
-                    <Bot size={20} />
+                  <button key={i} type="button" className={`agent-avatar-pick ${form.avatar === i ? 'is-selected' : ''}`} aria-label={`Avatar ${i + 1}`} onClick={() => set({ avatar: i })}>
+                    <img src={`/avatars/${i}.png`} alt="" />
                   </button>
                 ))}
               </div>
@@ -367,6 +367,12 @@ function BrainPanel() {
         <Button size="sm" variant="outline" className="text-[10px] h-7" onClick={refresh} data-testid="refresh-brain">Atualizar</Button>
       </div>
       <p className="text-[10px] text-muted-foreground">O agente lê isto antes de responder: volume de leads, fontes, assuntos, etiquetas e o que você ensinar aqui.</p>
+      <div className="brain-canvas">
+        <iframe src="/brain.html" title="Cérebro da workspace" loading="lazy" />
+        <div className="brain-overlay">
+          <strong>{brain.players}</strong><span>leads na memória</span>
+        </div>
+      </div>
       <div className="lead-metrics">
         <div className="lead-metric"><span>Leads</span><strong>{brain.players}</strong></div>
         <div className="lead-metric"><span>Com FTD</span><strong>{brain.ftds}</strong></div>
@@ -430,21 +436,18 @@ export default function AIAgentsPage() {
             <p>Crie o primeiro agente. Ele lê o cérebro da workspace antes de responder.</p>
           </div>
         ) : items.map(agent => (
-          <div key={agent._id} className={`stat-card agent-card ${agent.status === 'active' ? 'is-active' : ''}`} data-testid={`agent-${agent._id}`}>
-            <div className="flex items-start justify-between">
-              <div className={`agent-avatar av-${agent.avatar || 0}`}><Bot size={20} /></div>
-              <Switch checked={agent.status === 'active'} onCheckedChange={v => toggle(agent, v)} aria-label="Ativar agente" />
-            </div>
-            <strong className="text-sm mt-2 block">{agent.name}</strong>
-            <span className="text-[10px] text-muted-foreground">{agent.description || (agent.mode === 'automatic' ? 'Responde sozinho' : 'Sugere para o operador')}</span>
-            <div className="flex flex-wrap gap-1 mt-2">
-              <Badge variant="outline" className="text-[9px]">{(options.tones || {})[agent.tone] || agent.tone}</Badge>
-              <Badge variant="outline" className="text-[9px]">{((options.models || []).find(m => m.id === agent.model) || {}).label || agent.model}</Badge>
-              {agent.followup_enabled && <Badge variant="outline" className="text-[9px]">follow-up</Badge>}
-            </div>
-            <div className="flex gap-2 mt-3">
-              <Button size="sm" className="flex-1 text-[10px] h-7" onClick={() => setEditing(agent)}>Configurar</Button>
-              <Button size="sm" variant="outline" className="text-[10px] h-7 text-destructive" onClick={() => remove(agent)}><Trash2 size={12} /></Button>
+          <div key={agent._id} className="agent-card-wrap" data-testid={`agent-${agent._id}`}>
+            <img className="agent-card-avatar" src={`/avatars/${agent.avatar || 0}.png`} alt="" />
+            <div className={`agent-card ${agent.status === 'active' ? 'is-active' : ''}`}>
+              <Switch className="agent-card-switch" checked={agent.status === 'active'} onCheckedChange={v => toggle(agent, v)} aria-label="Ativar agente" />
+              <strong className="agent-card-name">{agent.name}</strong>
+              <span className="agent-card-role">{agent.mode === 'automatic' ? 'ATENDE SOZINHO' : 'SUGERE PARA O OPERADOR'}</span>
+              <span className="agent-card-tone">{(options.tones || {})[agent.tone] || agent.tone}</span>
+              <div className="agent-card-actions">
+                <Button size="sm" className="flex-1 text-[10px] h-8" onClick={() => setEditing(agent)}>Configurar</Button>
+                <Button size="sm" variant="outline" className="flex-1 text-[10px] h-8" onClick={() => setEditing({ ...agent, _tab: 'test' })}>Testar</Button>
+                <Button size="sm" variant="outline" className="text-[10px] h-8 text-destructive" aria-label="Remover" onClick={() => remove(agent)}><Trash2 size={12} /></Button>
+              </div>
             </div>
           </div>
         ))}

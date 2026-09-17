@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { statusLabel } from '@/lib/labels';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { formatApiError } from '@/lib/api';
 import { money, num } from '@/lib/utils';
@@ -116,8 +117,8 @@ export default function PlayerDetail({ id }) {
             <Field label="Fonte">{attr.source ? (SOURCE_LABELS[attr.source] || attr.source) : null}</Field>
             <Field label="Método">{METHOD[attr.method] || attr.method}</Field>
             <Field label="click_id"><span className="font-mono">{attr.click_id}</span></Field>
-            <Field label="Link">{acq.link ? <Link className="underline" to={`/tracking/${acq.link._id}`}>{acq.link.name} (/{acq.link.slug})</Link> : null}</Field>
-            <Field label="Campanha">{acq.campaign ? <Link className="underline" to={`/media/${acq.campaign._id}`}>{acq.campaign.name}</Link> : null}</Field>
+            <Field label="Link">{acq.link ? <Link className="hover:text-primary" to={`/tracking/${acq.link._id}`}>{acq.link.name} (/{acq.link.slug})</Link> : null}</Field>
+            <Field label="Campanha">{acq.campaign ? <Link className="hover:text-primary" to={`/media/${acq.campaign._id}`}>{acq.campaign.name}</Link> : null}</Field>
             <Field label="Clique em">{acq.click ? when(acq.click.created_at) : null}</Field>
             <Field label="utm_campaign">{click.utm_campaign}</Field>
             <Field label="utm_content">{click.utm_content}</Field>
@@ -182,7 +183,7 @@ export default function PlayerDetail({ id }) {
                 ) : p.conversations.map(c => (
                   <TableRow key={c._id} className="cursor-pointer" onClick={() => navigate(`/inbox/${c._id}`)}>
                     <TableCell className="text-xs capitalize">{c.integration_name || c.channel}</TableCell>
-                    <TableCell><Badge variant="outline" className="text-[9px]">{c.status}</Badge></TableCell>
+                    <TableCell><Badge variant="outline" className="text-[9px]">{statusLabel(c.status)}</Badge></TableCell>
                     <TableCell className="text-[10px] text-muted-foreground max-w-[260px] truncate">{c.last_message || '—'}</TableCell>
                     <TableCell className="text-[10px]">{when(c.updated_at)}</TableCell>
                   </TableRow>
@@ -210,7 +211,7 @@ export default function PlayerDetail({ id }) {
                     <TableCell className="text-[10px]">{when(e.created_at)}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[9px]">{e.type}</Badge></TableCell>
                     <TableCell className="text-xs">{e.source || '—'}</TableCell>
-                    <TableCell className="text-[10px] text-muted-foreground">{e.status}</TableCell>
+                    <TableCell className="text-[10px] text-muted-foreground">{statusLabel(e.status)}</TableCell>
                     <TableCell className="text-xs text-right">{e.value === null || e.value === undefined ? '—' : money(e.value, e.currency || 'BRL')}</TableCell>
                   </TableRow>
                 ))}

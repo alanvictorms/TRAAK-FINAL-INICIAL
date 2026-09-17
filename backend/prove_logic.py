@@ -8,6 +8,7 @@ KILL_SWITCHES = {
     "capi": "Envio de conversões para a Meta (CAPI)",
     "ai": "Copiloto e respostas por IA",
     "ingest_tap": "Recebimento de postbacks da casa (TAP)",
+    "webhooks": "Webhooks de saída",
 }
 
 POLICY_TYPES = {

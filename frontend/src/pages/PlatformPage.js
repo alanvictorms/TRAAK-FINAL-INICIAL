@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { statusLabel } from '@/lib/labels';
 import { useLocation } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -158,7 +159,7 @@ export default function PlatformPage() {
                     <TableCell className="text-xs">{p.provider}</TableCell>
                     <TableCell className="text-[10px] font-mono">{p.model}</TableCell>
                     <TableCell className="text-[10px] font-mono text-muted-foreground">{p.api_key_masked}</TableCell>
-                    <TableCell><Badge className={`text-[9px] ${p.status === 'active' ? 'badge-success' : 'badge-error'}`}>{p.status}</Badge></TableCell>
+                    <TableCell><Badge className={`text-[9px] ${p.status === 'active' ? 'badge-success' : 'badge-error'}`}>{statusLabel(p.status)}</Badge></TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteProvider(p._id)}><Trash2 size={13} /></Button>
                     </TableCell>

@@ -125,7 +125,7 @@ export default function SegmentsPage() {
                 <TableCell className="text-xs font-medium">{s.name}</TableCell>
                 <TableCell><Badge variant="outline" className="text-[9px]">{s.logic?.toUpperCase()}</Badge></TableCell>
                 <TableCell className="text-[10px] text-muted-foreground">{Object.entries(s.conditions || {}).map(([f, c]) => `${FIELD_LABELS[f] || f} ${c.op}${BOOL.includes(f) ? '' : ` ${c.value}`}`).join(' · ') || 'todos'}</TableCell>
-                <TableCell className="text-xs">{s.error ? <span className="text-destructive text-[10px]">{s.error}</span> : <button type="button" className="underline" onClick={() => openMembers(s)}>{s.count ?? '—'}</button>}</TableCell>
+                <TableCell className="text-xs">{s.error ? <span className="text-destructive text-[10px]">{s.error}</span> : <button type="button" className="hover:text-primary" onClick={() => openMembers(s)}>{s.count ?? '—'}</button>}</TableCell>
                 <TableCell className="text-[10px] text-muted-foreground">{s.last_evaluated ? new Date(s.last_evaluated).toLocaleString('pt-BR') : 'Nunca'}</TableCell>
                 <TableCell className="text-right">
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(s._id)}><Trash2 size={13} /></Button>
@@ -188,7 +188,7 @@ export default function SegmentsPage() {
           <DialogHeader><DialogTitle>{members?.seg.name} · {members?.total} players</DialogTitle></DialogHeader>
           <div className="max-h-80 overflow-auto">
             {(members?.items || []).map(pl => (
-              <button key={pl._id} type="button" className="block w-full text-left text-xs py-1 border-b border-border hover:underline" onClick={() => navigate(`/players/${pl._id}`)}>
+              <button key={pl._id} type="button" className="block w-full text-left text-xs py-1 border-b border-border hover:text-primary" onClick={() => navigate(`/players/${pl._id}`)}>
                 {pl.name || pl._id.slice(-8)} <span className="text-muted-foreground">· {pl.source || 'sem atribuição'}{pl.has_ftd ? ' · FTD' : ''}</span>
               </button>
             ))}

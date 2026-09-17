@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { statusLabel } from '@/lib/labels';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,7 +56,7 @@ export default function MonitoringPage() {
                   <TableRow key={i.id}>
                     <TableCell className="text-xs font-medium">{i.name}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">{i.provider}</TableCell>
-                    <TableCell><Badge className={`text-[9px] ${i.status === 'active' || i.status === 'configured' ? 'badge-success' : i.status === 'error' ? 'badge-error' : ''}`}>{i.status}</Badge></TableCell>
+                    <TableCell><Badge className={`text-[9px] ${i.status === 'active' || i.status === 'configured' ? 'badge-success' : i.status === 'error' ? 'badge-error' : ''}`}>{statusLabel(i.status)}</Badge></TableCell>
                     <TableCell className="text-[10px] text-muted-foreground">{i.last_sync ? new Date(i.last_sync).toLocaleString('pt-BR') : '—'}</TableCell>
                     <TableCell className="text-[10px] text-muted-foreground">{i.last_test?.status || '—'}</TableCell>
                   </TableRow>
@@ -89,7 +90,7 @@ export default function MonitoringPage() {
                     <TableCell className="text-[10px] font-mono">{e._id?.slice(-8)}</TableCell>
                     <TableCell><Badge variant="outline" className="text-[9px]">{e.type}</Badge></TableCell>
                     <TableCell className="text-xs">{e.source || '—'}</TableCell>
-                    <TableCell><Badge className="text-[9px] badge-error">{e.status}</Badge></TableCell>
+                    <TableCell><Badge className="text-[9px] badge-error">{statusLabel(e.status)}</Badge></TableCell>
                     <TableCell className="text-xs">{(e.attempts || []).length}</TableCell>
                     <TableCell className="text-[10px] text-muted-foreground">{new Date(e.created_at).toLocaleString('pt-BR')}</TableCell>
                     <TableCell className="text-right"><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => reprocess(e._id)}><RefreshCw size={13} /></Button></TableCell>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { statusLabel } from '@/lib/labels';
 import { useNavigate, useParams } from 'react-router-dom';
 import api, { formatApiError } from '@/lib/api';
 import { money } from '@/lib/utils';
@@ -123,7 +124,7 @@ function PlayerList() {
                 <TableCell className="text-xs font-medium">{item.name || item._id.slice(-8)}</TableCell>
                 <TableCell className="text-xs">{item.source ? (SOURCE_LABELS[item.source] || item.source) : <span className="text-muted-foreground">—</span>}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{item.origin || '—'}</TableCell>
-                <TableCell><Badge variant="outline" className="text-[9px]">{item.status}</Badge></TableCell>
+                <TableCell><Badge variant="outline" className="text-[9px]">{statusLabel(item.status)}</Badge></TableCell>
                 <TableCell>{item.has_ftd ? <Badge className="badge-success text-[9px]">Sim</Badge> : <span className="text-xs text-muted-foreground">—</span>}</TableCell>
                 <TableCell className="text-xs">{item.total_deposits ? money(item.total_deposits) : '—'}</TableCell>
                 <TableCell className="text-xs">{(item.tags || []).map(t => <Badge key={t} variant="outline" className="text-[8px] mr-1">{t}</Badge>)}</TableCell>

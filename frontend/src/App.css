@@ -631,17 +631,17 @@ button.topbar-search:focus-visible { outline: 2px solid hsl(var(--ring)); outlin
 .palette-item div { display: flex; flex-direction: column; min-width: 0; }
 .palette-item strong { font-size: 10px; line-height: 1.35; }
 .palette-item small { font-size: 8px; color: hsl(210 17% 67%); margin-top: 2px; }
-.flow-canvas { min-width: 0; min-height: 0; background: #041714; }
+.flow-canvas { min-width: 0; min-height: 0; background: hsl(174 80% 3.5%); }
 .flow-canvas .react-flow__controls { border: 1px solid hsl(var(--border)); border-radius: 7px; overflow: hidden; box-shadow: none; }
-.flow-canvas .react-flow__controls-button { background: hsl(210 32% 13%); color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
+.flow-canvas .react-flow__controls-button { background: hsl(165 40% 8%); color: hsl(var(--foreground)); border-color: hsl(var(--border)); }
 .flow-canvas .react-flow__controls-button:hover { background: hsl(160 30% 18%); }
 .flow-canvas .react-flow__minimap { border: 1px solid hsl(var(--border)); border-radius: 7px; background: hsl(210 32% 13%); }
-.flow-node { width: 184px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--node-color) 75%, #24413e); border-radius: 9px; background: hsl(210 32% 13%); box-shadow: 0 8px 30px rgba(0,0,0,.22); }
+.flow-node { width: 184px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--node-color) 45%, hsl(var(--border))); border-radius: 9px; background: hsl(165 40% 8%); box-shadow: 0 8px 30px rgba(0,0,0,.28); }
 .flow-node.is-selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--node-color) 55%, transparent), 0 8px 30px rgba(0,0,0,.3); }
-.flow-node-title { height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 10px; font-weight: 700; color: white; background: color-mix(in srgb, var(--node-color) 88%, #122725); }
+.flow-node-title { height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 10px; font-size: 10px; font-weight: 700; color: color-mix(in srgb, var(--node-color) 80%, white); background: color-mix(in srgb, var(--node-color) 14%, hsl(165 40% 10%)); border-bottom: 1px solid color-mix(in srgb, var(--node-color) 30%, transparent); }
 .flow-node-icon { display: grid; place-items: center; }
-.flow-node-description { padding: 8px 10px; font-size: 8px; color: hsl(210 17% 72%); }
-.flow-node .react-flow__handle { width: 8px; height: 8px; background: #5f87ff; border: 1px solid #a9bbff; }
+.flow-node-description { padding: 8px 10px; font-size: 8px; color: hsl(160 14% 70%); }
+.flow-node .react-flow__handle { width: 8px; height: 8px; background: hsl(87 80% 60%); border: 1px solid hsl(87 60% 40%); }
 .flow-settings-heading { font-size: 13px; font-weight: 650; margin: 0 0 16px; }
 .flow-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
 .flow-field label { font-size: 10px; color: hsl(190 20% 76%); }
@@ -786,3 +786,67 @@ button.topbar-search:focus-visible { outline: 2px solid hsl(var(--ring)); outlin
 .agent-test-log span { display: block; color: hsl(var(--muted-foreground)); font-size: 9px; }
 .agent-test-log p { font-size: 11px; white-space: pre-wrap; }
 .agent-run { padding: 8px; border: 1px solid hsl(var(--border)); border-radius: 8px; }
+
+
+/* ── Links sem sublinhado ── */
+a, a:hover, .underline { text-decoration: none; }
+a:hover { color: hsl(var(--primary)); }
+
+/* ── Cards de domínio ── */
+.domain-grid, .automation-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(268px, 1fr)); gap: 12px; }
+.domain-card, .automation-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; }
+.domain-card-top, .automation-card-top { display: flex; align-items: flex-start; justify-content: space-between; }
+.domain-icon, .automation-icon { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 9px; color: hsl(160 18% 66%); background: hsl(165 40% 8%); border: 1px solid hsl(var(--border)); }
+.domain-icon.is-on, .automation-icon.is-on { color: hsl(157 50% 12%); background: hsl(87 80% 72%); border-color: transparent; }
+.domain-name, .automation-name { padding: 0; border: 0; background: transparent; color: hsl(var(--foreground)); font-size: 13px; font-weight: 650; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.domain-name:hover, .automation-name:hover { color: hsl(var(--primary)); }
+.domain-card-foot, .automation-card-foot { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid hsl(var(--border)); }
+.domain-hint { display: flex; align-items: center; gap: 5px; color: hsl(42 70% 62%); font-size: 9px; }
+.domain-hint.is-ok { color: hsl(140 60% 62%); }
+
+/* ── Gavetas (domínio, identidade) ── */
+.drawer-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.drawer-summary > div { display: flex; flex-direction: column; gap: 4px; padding: 9px 10px; border-radius: 8px; background: hsl(165 40% 8%); }
+.drawer-summary span { color: hsl(160 14% 55%); font-size: 8px; text-transform: uppercase; letter-spacing: .6px; }
+.drawer-summary strong { font-size: 11px; }
+.drawer-label { margin-bottom: 7px; color: hsl(160 18% 55%); font-size: 8px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; }
+.dns-record { padding: 10px; border: 1px solid hsl(var(--border)); border-radius: 9px; background: hsl(165 40% 6%); }
+.dns-record + .dns-record { margin-top: 8px; }
+.dns-record-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; }
+.dns-record-head button { color: hsl(var(--muted-foreground)); background: transparent; border: 0; cursor: pointer; }
+.dns-record-head button:hover { color: hsl(var(--primary)); }
+.dns-line { display: flex; align-items: baseline; gap: 8px; font-size: 10px; }
+.dns-line span { width: 42px; color: hsl(160 14% 55%); font-size: 9px; }
+.dns-line code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.domain-check, .identity-event { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid hsl(var(--border)); }
+.domain-check:last-child, .identity-event:last-child { border-bottom: 0; }
+.identity-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid hsl(var(--border)); }
+.identity-rows > div:last-child { border-bottom: 0; }
+.identity-rows span { color: hsl(160 14% 55%); font-size: 9px; text-transform: capitalize; }
+.identity-rows strong { font-size: 10px; overflow-wrap: anywhere; }
+
+/* ── Card do agente: avatar saindo do card, luz atrás ── */
+.agent-grid { grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); row-gap: 62px; }
+.agent-card-wrap { position: relative; padding-top: 54px; }
+.agent-card-avatar { position: absolute; top: 0; left: 50%; width: 132px; transform: translateX(-50%); z-index: 2; pointer-events: none;
+  filter: drop-shadow(0 10px 18px hsl(174 80% 3% / .7)); }
+.agent-card { position: relative; padding: 78px 16px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  border: 1px solid hsl(var(--border)); border-radius: 14px; background: radial-gradient(120% 80% at 50% 0%, hsl(157 45% 14%) 0%, hsl(165 40% 7%) 62%); }
+.agent-card.is-active { border-color: hsl(154 45% 34%);
+  background: radial-gradient(120% 80% at 50% 0%, hsl(120 50% 20%) 0%, hsl(165 42% 8%) 62%); box-shadow: 0 0 0 1px hsl(154 45% 24%), 0 16px 40px hsl(120 60% 6% / .6); }
+.agent-card-switch { position: absolute; top: 12px; right: 12px; z-index: 3; }
+.agent-card-name { font-size: 15px; font-weight: 700; text-align: center; }
+.agent-card-role { color: hsl(87 80% 72%); font-size: 9px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+.agent-card-tone { color: hsl(var(--muted-foreground)); font-size: 10px; text-transform: capitalize; }
+.agent-card-actions { width: 100%; margin-top: 12px; display: flex; gap: 6px; }
+.agent-avatars { display: flex; gap: 10px; margin-top: 6px; }
+.agent-avatar-pick { width: 56px; height: 56px; padding: 0; overflow: hidden; border: 2px solid hsl(var(--border)); border-radius: 12px; background: hsl(165 40% 10%); cursor: pointer; }
+.agent-avatar-pick img { width: 100%; height: 100%; object-fit: cover; }
+.agent-avatar-pick.is-selected { border-color: hsl(87 80% 72%); }
+
+/* ── Cérebro interativo ── */
+.brain-canvas { position: relative; height: 280px; overflow: hidden; border: 1px solid hsl(var(--border)); border-radius: 12px; background: hsl(174 80% 3.5%); }
+.brain-canvas iframe { width: 100%; height: 100%; border: 0; display: block; }
+.brain-overlay { position: absolute; left: 14px; bottom: 12px; display: flex; flex-direction: column; pointer-events: none; }
+.brain-overlay strong { color: hsl(87 80% 72%); font-size: 20px; line-height: 1; }
+.brain-overlay span { color: hsl(160 14% 62%); font-size: 9px; text-transform: uppercase; letter-spacing: .8px; }

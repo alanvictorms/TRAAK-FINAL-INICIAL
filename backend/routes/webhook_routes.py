@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from datetime import datetime, timezone, timedelta
 from database import db, is_killed
+from webhooks_out import emit as emit_webhook
 from bson import ObjectId
 from messaging import ingest_incoming_message, notify
 from attribution import is_start_command, membership_change, start_param
@@ -72,6 +73,19 @@ async def tap_webhook_scoped(integration_id: str, request: Request):
     expected = (integration.get("config") or {}).get("postback_token")
     if not expected or not hmac.compare_digest(expected, supplied):
         raise HTTPException(401, "Token de postback inválido")
+    return await _process_tap(request, integration["workspace_id"], integration)
+
+
+@router.post("/in/{integration_id}")
+async def inbound_webhook(integration_id: str, request: Request):
+    """Webhook de entrada e postback genérico: mesma leitura do postback da casa."""
+    integration = await _messaging_integration(integration_id)
+    if integration.get("provider") not in ("webhook_in", "postback"):
+        raise HTTPException(404, "Integração não encontrada")
+    supplied = request.query_params.get("token") or request.headers.get("X-Trak-Token") or ""
+    expected = (integration.get("config") or {}).get("postback_token")
+    if not expected or not hmac.compare_digest(expected, supplied):
+        raise HTTPException(401, "Token inválido")
     return await _process_tap(request, integration["workspace_id"], integration)
 
 
@@ -201,6 +215,10 @@ async def _process_tap(request: Request, workspace_id: str, integration: dict):
         "created_at": now,
     }
     result = await db.events.insert_one(event_doc)
+    await emit_webhook(workspace_id, f"event.{event_doc.get('type')}", {
+        "event_id": str(result.inserted_id), "type": event_doc.get("type"),
+        "value": event_doc.get("value"), "player_id": event_doc.get("player_id"),
+        "source": event_doc.get("source"), "external_id": event_doc.get("external_id")})
     event_id = str(result.inserted_id)
     link_id = (attribution or {}).get("link_id")
     if event_type == "ftd" and link_id and ObjectId.is_valid(link_id):

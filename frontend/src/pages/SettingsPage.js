@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { statusLabel } from '@/lib/labels';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
@@ -224,7 +225,7 @@ export default function SettingsPage() {
                   <TableRow key={k._id}>
                     <TableCell className="text-xs">{k.name}</TableCell>
                     <TableCell className="text-[10px] font-mono">{k.key_prefix}...</TableCell>
-                    <TableCell><Badge className={`text-[9px] ${k.status === 'active' ? 'badge-success' : 'badge-error'}`}>{k.status}</Badge></TableCell>
+                    <TableCell><Badge className={`text-[9px] ${k.status === 'active' ? 'badge-success' : 'badge-error'}`}>{statusLabel(k.status)}</Badge></TableCell>
                     <TableCell className="text-[10px] text-muted-foreground">{new Date(k.created_at).toLocaleDateString('pt-BR')}</TableCell>
                     <TableCell className="text-right">
                       {k.status === 'active' && <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => revokeKey(k._id)}><Trash2 size={13} /></Button>}

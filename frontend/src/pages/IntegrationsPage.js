@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { statusLabel } from '@/lib/labels';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +10,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Search, Radar, Settings, TestTube, Trash2 } from 'lucide-react';
+import { Search, Radar, Settings, TestTube, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const PROVIDERS = [
@@ -101,6 +102,32 @@ const PROVIDERS = [
     ],
     capabilities: ['dns_proxy', 'ssl', 'workers'],
     docs: 'Proxy/encaminhamento de tracking e postback vinculado aos domínios.'
+  },
+  { id: 'webhook_out', name: 'Webhooks de saída', category: 'infra', desc: 'Avisa seu sistema a cada evento da plataforma',
+    fields: [
+      { key: 'callback_url', label: 'URL de callback', type: 'text', required: true, placeholder: 'https://seusistema.com/eventos',
+        hint: 'Endereço que o serviço vai chamar quando houver um evento. Cole aqui a URL informada na sua conta.' },
+      { key: 'secret', label: 'Segredo para assinar (opcional)', type: 'password', hint: 'Enviamos a assinatura no cabeçalho X-Trak-Signature.' },
+      { key: 'api_key', label: 'Token de autorização (opcional)', type: 'password', hint: 'Vai no cabeçalho Authorization: Bearer.' },
+    ],
+    capabilities: ['event_push', 'hmac_signature', 'retry'],
+    docs: 'Enviamos um POST em JSON a cada lead novo, mensagem recebida, cadastro, FTD, depósito, saque e disparo concluído.'
+  },
+  { id: 'webhook_in', name: 'Webhook de entrada', category: 'infra', desc: 'Recebe eventos de sistemas seus',
+    fields: [
+      { key: 'source_name', label: 'Nome de quem envia', type: 'text', placeholder: 'ERP, checkout, painel próprio' },
+      { key: 'postback_url', label: 'URL para o seu sistema chamar (gerada)', type: 'text', readonly: true, placeholder: 'Gerada após salvar' },
+    ],
+    capabilities: ['receive_events', 'token_auth'],
+    docs: 'Depois de salvar, copie a URL gerada e chame com POST em JSON: event (register, ftd, deposit, withdrawal), customer_id, amount e transaction_id.'
+  },
+  { id: 'postback', name: 'Postback da casa', category: 'revenue', desc: 'URL de postback para casas sem integração pronta',
+    fields: [
+      { key: 'house_name', label: 'Nome da casa', type: 'text', required: true },
+      { key: 'postback_url', label: 'URL de postback (gerada)', type: 'text', readonly: true, placeholder: 'Gerada após salvar' },
+    ],
+    capabilities: ['postback_s2s', 'reconciliation'],
+    docs: 'Cadastre a URL gerada no painel da casa. Os eventos entram no ledger e na atribuição igual ao TAP.'
   },
   { id: 'openai', name: 'OpenAI', category: 'ia', desc: 'Copiloto e processamento IA',
     fields: [
@@ -223,9 +250,6 @@ export default function IntegrationsPage() {
           <h1>Integrações<span className="accent">.</span></h1>
           <p className="page-description">Conecte provedores de receita, aquisição, mensageria e infraestrutura.</p>
         </div>
-        <Button onClick={() => setShowCreate(true)} data-testid="create-integration-btn">
-          <Plus size={14} className="mr-2" /> Nova integração
-        </Button>
       </div>
 
       <div className="data-toolbar">
@@ -297,20 +321,16 @@ export default function IntegrationsPage() {
 
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
         <DialogContent className="max-w-lg" data-testid="create-integration-dialog">
-          <DialogHeader><DialogTitle>Nova integração</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Conectar {selectedProvider?.name || 'integração'}</DialogTitle></DialogHeader>
           <form onSubmit={handleCreate}>
             <div className="space-y-4">
-              <div>
-                <Label className="text-xs">Provedor</Label>
-                <Select value={form.provider} onValueChange={v => { setForm({ provider: v }); setCredFields({}); }}>
-                  <SelectTrigger className="text-xs mt-1"><SelectValue placeholder="Selecione..." /></SelectTrigger>
-                  <SelectContent>
-                    {PROVIDERS.map(p => (
-                      <SelectItem key={p.id} value={p.id} className="text-xs">{p.name} — {p.desc}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {selectedProvider && (
+                <div className="flex items-center gap-2">
+                  <span className={`catalog-icon cat-${selectedProvider.category}`}><Radar size={16} /></span>
+                  <div><strong className="text-xs block">{selectedProvider.name}</strong>
+                    <span className="text-[10px] text-muted-foreground">{selectedProvider.desc}</span></div>
+                </div>
+              )}
               {selectedProvider && (
                 <>
                   {selectedProvider.docs && (
@@ -370,7 +390,7 @@ export default function IntegrationsPage() {
                 <TabsContent value="overview" className="space-y-3 mt-3">
                   <div className="text-xs"><span className="text-muted-foreground">Provedor:</span> {showDetail.provider}</div>
                   <div className="text-xs"><span className="text-muted-foreground">Categoria:</span> {showDetail.category}</div>
-                  <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{showDetail.status}</Badge></div>
+                  <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{statusLabel(showDetail.status)}</Badge></div>
                   <div className="text-xs"><span className="text-muted-foreground">Criada:</span> {new Date(showDetail.created_at).toLocaleString('pt-BR')}</div>
                   {showDetail.last_test && <div className="text-xs"><span className="text-muted-foreground">Último teste:</span> {showDetail.last_test.status} em {new Date(showDetail.last_test.tested_at).toLocaleString('pt-BR')}</div>}
                   {showDetail.webhook_error && <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-3"><span className="font-medium">Erro no webhook:</span> {showDetail.webhook_error}</div>}

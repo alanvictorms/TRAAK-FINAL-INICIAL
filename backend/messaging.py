@@ -359,6 +359,13 @@ async def ingest_incoming_message(
         workspace_id, integration_id, conversation_id, message_id, str(player["_id"])
     )
     try:
+        from webhooks_out import emit as emit_webhook
+        await emit_webhook(workspace_id, "message.received", {
+            "conversation_id": conversation_id, "player_id": str(player["_id"]),
+            "player_name": player.get("name"), "channel": provider, "content": content})
+    except Exception as exc:  # noqa: BLE001 — webhook do cliente não derruba a mensagem
+        logger.warning("webhook de saída falhou: %s", exc)
+    try:
         from ai_agent import on_incoming
         await on_incoming(conversation, player, content or "")
     except Exception as exc:  # noqa: BLE001 — a mensagem do lead não se perde por causa da IA
@@ -427,6 +434,26 @@ async def run_monitors() -> None:
             )
 
 
+async def recheck_domains() -> None:
+    """Revê os domínios que ainda não estão ativos, e os ativos de hora em hora."""
+    from domains_check import check_domain, expected_records
+    now = datetime.now(timezone.utc)
+    async for doc in db.domains.find({"$or": [
+        {"status": {"$ne": "active"}},
+        {"last_check": {"$lte": now - timedelta(hours=1)}},
+    ]}).limit(30):
+        result = await check_domain(doc["domain"])
+        if result["status"] != doc.get("status"):
+            await notify(doc["workspace_id"], "domain_status",
+                         f"Domínio {doc['domain']}: {result['status']}", result["detail"],
+                         link="/domains", dedupe_key=f"domain:{doc['_id']}")
+        await db.domains.update_one({"_id": doc["_id"]}, {"$set": {
+            "status": result["status"], "ssl_status": result["ssl_status"],
+            "last_check": result["checked_at"], "last_check_detail": result["detail"],
+            "dns_records": expected_records(doc["domain"], doc["workspace_id"])}})
+        await db.domain_checks.insert_one({"domain_id": str(doc["_id"]), "workspace_id": doc["workspace_id"], **result})
+
+
 async def monitor_loop(interval_seconds: int = 900) -> None:
     import asyncio
     while True:
@@ -434,6 +461,10 @@ async def monitor_loop(interval_seconds: int = 900) -> None:
             await run_monitors()
         except Exception as exc:  # noqa: BLE001 — o laço não pode morrer por um workspace
             logger.error("monitor falhou: %s", exc)
+        try:
+            await recheck_domains()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("verificação de domínios: %s", exc)
         try:
             from routes.prove_routes import run_due_reports
             await run_due_reports()

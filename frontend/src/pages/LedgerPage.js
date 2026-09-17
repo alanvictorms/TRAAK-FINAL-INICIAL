@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { statusLabel } from '@/lib/labels';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -135,7 +136,7 @@ export default function LedgerPage() {
                 <TableCell className="text-[10px] font-mono text-muted-foreground">{item._id?.slice(-8)}</TableCell>
                 <TableCell><Badge className={`text-[9px] ${typeColors[item.type] || ''}`}>{item.type}</Badge></TableCell>
                 <TableCell className="text-xs">{item.person_id ? item.person_id.slice(-8) : '—'}</TableCell>
-                <TableCell><Badge className={`text-[9px] ${statusColors[item.status] || ''}`}>{item.status}</Badge></TableCell>
+                <TableCell><Badge className={`text-[9px] ${statusColors[item.status] || ''}`}>{statusLabel(item.status)}</Badge></TableCell>
                 <TableCell className="text-xs">{item.value != null ? `R$ ${item.value.toFixed(2)}` : '—'}</TableCell>
                 <TableCell className="text-[10px] text-muted-foreground">{new Date(item.created_at).toLocaleString('pt-BR')}</TableCell>
                 <TableCell className="text-right">
@@ -191,7 +192,7 @@ export default function LedgerPage() {
           {showDetail && (
             <div className="space-y-2 text-xs">
               <div><span className="text-muted-foreground">Tipo:</span> {showDetail.type}</div>
-              <div><span className="text-muted-foreground">Status:</span> {showDetail.status}</div>
+              <div><span className="text-muted-foreground">Status:</span> {statusLabel(showDetail.status)}</div>
               <div><span className="text-muted-foreground">Pessoa:</span> {showDetail.person_id || 'Não vinculado'}</div>
               <div><span className="text-muted-foreground">Fonte:</span> {showDetail.source || '—'}</div>
               <div><span className="text-muted-foreground">Valor:</span> {showDetail.value != null ? `R$ ${showDetail.value.toFixed(2)}` : '—'}</div>

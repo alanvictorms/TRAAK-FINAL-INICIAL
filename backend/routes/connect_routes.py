@@ -2,6 +2,9 @@ from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import RedirectResponse, PlainTextResponse
 from datetime import datetime, timezone
 from bson import ObjectId
+from domains_check import (
+    PURPOSE_LABELS, SSL_LABELS, STATUS_LABELS as DOMAIN_STATUS, check_domain, expected_records, tracking_host,
+)
 from database import db, audit as _audit
 from auth import get_current_user
 from models import IntegrationCreate, IntegrationUpdate, DomainCreate, DomainUpdate, TrackingLinkCreate, TrackingLinkUpdate
@@ -48,10 +51,10 @@ async def get_integration(integration_id: str, request: Request):
     if not doc:
         raise HTTPException(404, "Integração não encontrada")
     doc["_id"] = str(doc["_id"])
-    if doc.get("provider") == "tap" and not (doc.get("config") or {}).get("postback_token"):
+    if doc.get("provider") in INBOUND_PROVIDERS and not (doc.get("config") or {}).get("postback_token"):
         token = secrets.token_urlsafe(24)
         config = {**(doc.get("config") or {}), "postback_token": token,
-                  "postback_url": f"{public_api_base(request)}/api/webhooks/tap/{doc['_id']}?token={token}"}
+                  "postback_url": inbound_url(public_api_base(request), doc["provider"], doc["_id"], token)}
         await db.integrations.update_one({"_id": ObjectId(integration_id)}, {"$set": {"config": config}})
         doc["config"] = config
     if "credentials" in doc:
@@ -68,7 +71,7 @@ async def create_integration(body: IntegrationCreate, request: Request):
     credentials = dict(body.credentials)
     if body.provider == "telegram":
         credentials["webhook_secret"] = secrets.token_urlsafe(24)
-    if body.provider == "tap":
+    if body.provider in INBOUND_PROVIDERS:
         config["postback_token"] = secrets.token_urlsafe(24)
     doc = {
         "workspace_id": user["workspace_id"],
@@ -92,8 +95,8 @@ async def create_integration(body: IntegrationCreate, request: Request):
         config.update({
             "webhook_url": f"{base_url}/api/webhooks/telegram/{doc['_id']}",
         })
-    elif body.provider == "tap":
-        config["postback_url"] = f"{base_url}/api/webhooks/tap/{doc['_id']}?token={config['postback_token']}"
+    elif body.provider in INBOUND_PROVIDERS:
+        config["postback_url"] = inbound_url(base_url, body.provider, doc["_id"], config["postback_token"])
     elif body.provider in ("meta", "whatsapp"):
         config["webhook_url"] = f"{base_url}/api/webhooks/meta/{doc['_id']}"
         if body.provider == "meta":
@@ -189,7 +192,25 @@ async def register_integration_webhook(integration_id: str, request: Request):
     return result
 
 
+INBOUND_PROVIDERS = ("tap", "webhook_in", "postback")
+
+
+def inbound_url(base_url, provider, integration_id, token):
+    """URL que o parceiro chama: a do TAP continua na rota antiga."""
+    path = "tap" if provider == "tap" else "in"
+    return f"{base_url}/api/webhooks/{path}/{integration_id}?token={token}"
+
+
 # ── Domains ──
+def _domain_view(doc):
+    doc["_id"] = str(doc["_id"])
+    doc["status_label"] = DOMAIN_STATUS.get(doc.get("status"), doc.get("status"))
+    doc["ssl_label"] = SSL_LABELS.get(doc.get("ssl_status"), doc.get("ssl_status"))
+    doc["purpose_label"] = PURPOSE_LABELS.get(doc.get("purpose"), doc.get("purpose"))
+    return doc
+
+
+
 @router.get("/domains")
 async def list_domains(request: Request, search: str = None, page: int = 1, limit: int = 50):
     user = await get_current_user(request)
@@ -198,19 +219,24 @@ async def list_domains(request: Request, search: str = None, page: int = 1, limi
         query["domain"] = {"$regex": re.escape(search), "$options": "i"}
     total = await db.domains.count_documents(query)
     items = await db.domains.find(query).sort("created_at", -1).skip((page - 1) * limit).limit(limit).to_list(limit)
-    for item in items:
-        item["_id"] = str(item["_id"])
-    return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1}
+    return {"items": [_domain_view(item) for item in items], "total": total, "page": page,
+            "pages": math.ceil(total / limit) if total else 1, "target_host": tracking_host()}
 
 
 @router.get("/domains/{domain_id}")
 async def get_domain(domain_id: str, request: Request):
     user = await get_current_user(request)
+    if not ObjectId.is_valid(domain_id):
+        raise HTTPException(404, "Domínio não encontrado")
     doc = await db.domains.find_one({"_id": ObjectId(domain_id), "workspace_id": user["workspace_id"]})
     if not doc:
         raise HTTPException(404, "Domínio não encontrado")
-    doc["_id"] = str(doc["_id"])
-    return doc
+    doc["records"] = expected_records(doc["domain"], user["workspace_id"])
+    doc["checks"] = await db.domain_checks.find({"domain_id": domain_id}).sort("checked_at", -1).limit(10).to_list(10)
+    for check in doc["checks"]:
+        check["_id"] = str(check["_id"])
+    doc["links"] = await db.tracking_links.count_documents({"workspace_id": user["workspace_id"], "domain": doc["domain"]})
+    return _domain_view(doc)
 
 
 @router.post("/domains")
@@ -220,21 +246,44 @@ async def create_domain(body: DomainCreate, request: Request):
     existing = await db.domains.find_one({"domain": body.domain, "workspace_id": user["workspace_id"]})
     if existing:
         raise HTTPException(400, "Domínio já cadastrado")
+    domain = body.domain.strip().lower().rstrip(".")
+    if not re.fullmatch(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+", domain):
+        raise HTTPException(400, "Informe um domínio válido, como trk.seusite.com")
     doc = {
         "workspace_id": user["workspace_id"],
-        "domain": body.domain,
+        "domain": domain,
         "purpose": body.purpose,
         "status": "pending_dns",
         "ssl_status": "pending",
-        "dns_records": [],
+        "dns_records": expected_records(domain, user["workspace_id"]),
         "clicks_30d": 0,
         "last_check": None,
         "created_at": now,
         "updated_at": now,
     }
     result = await db.domains.insert_one(doc)
-    doc["_id"] = str(result.inserted_id)
-    return doc
+    doc["_id"] = result.inserted_id
+    return _domain_view(doc)
+
+
+@router.post("/domains/{domain_id}/verify")
+async def verify_domain(domain_id: str, request: Request):
+    """Consulta o DNS de verdade e tenta o HTTPS no domínio do cliente."""
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(domain_id):
+        raise HTTPException(404, "Domínio não encontrado")
+    doc = await db.domains.find_one({"_id": ObjectId(domain_id), "workspace_id": user["workspace_id"]})
+    if not doc:
+        raise HTTPException(404, "Domínio não encontrado")
+    result = await check_domain(doc["domain"])
+    await db.domains.update_one({"_id": doc["_id"]}, {"$set": {
+        "status": result["status"], "ssl_status": result["ssl_status"],
+        "last_check": result["checked_at"], "last_check_detail": result["detail"],
+        "dns_records": expected_records(doc["domain"], user["workspace_id"]),
+        "updated_at": result["checked_at"]}})
+    await db.domain_checks.insert_one({"domain_id": domain_id, "workspace_id": user["workspace_id"], **result})
+    return {**result, "status_label": DOMAIN_STATUS.get(result["status"], result["status"]),
+            "ssl_label": SSL_LABELS.get(result["ssl_status"], result["ssl_status"])}
 
 
 @router.delete("/domains/{domain_id}")

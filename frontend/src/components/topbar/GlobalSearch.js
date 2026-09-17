@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { statusLabel } from '@/lib/labels';
 import { useNavigate } from 'react-router-dom';
 import api from '@/lib/api';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -78,7 +79,7 @@ export default function GlobalSearch() {
                   {g.items.map(item => (
                     <CommandItem key={item.id} value={`${g.type}-${item.id}`} onSelect={() => go(item.link)} className="text-xs">
                       <span className="truncate">{item.title}</span>
-                      {item.status && <span className="ml-auto text-[10px] text-muted-foreground">{item.status}</span>}
+                      {item.status && <span className="ml-auto text-[10px] text-muted-foreground">{statusLabel(item.status)}</span>}
                     </CommandItem>
                   ))}
                 </CommandGroup>
