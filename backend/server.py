@@ -20,9 +20,12 @@ from routes.prove_routes import router as prove_router
 from routes.platform_routes import router as platform_router
 from routes.copilot_routes import router as copilot_router
 from routes.webhook_routes import router as webhook_router
+from telegram_service import sync_telegram_webhooks
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+# Bot API tokens are part of Telegram request URLs; never emit httpx request lines.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 app = FastAPI(title="TrakAquire API", version="1.0.0")
 
@@ -72,6 +75,14 @@ async def startup():
     await db.tracking_links.create_index([("workspace_id", 1), ("slug", 1)])
     await db.integrations.create_index([("workspace_id", 1)])
     await db.conversations.create_index([("workspace_id", 1), ("status", 1)])
+    await db.conversations.create_index([("workspace_id", 1), ("integration_id", 1), ("external_chat_id", 1)])
+    await db.messages.create_index(
+        [("workspace_id", 1), ("integration_id", 1), ("external_id", 1)],
+        unique=True,
+        sparse=True,
+    )
+    await db.automation_runs.create_index("run_key", unique=True)
+    await db.lead_tasks.create_index([("workspace_id", 1), ("player_id", 1), ("created_at", -1)])
     await db.audit_log.create_index([("workspace_id", 1), ("timestamp", -1)])
 
     # Seed admin
@@ -133,6 +144,7 @@ async def startup():
         f"- POST /api/auth/refresh\n"
     )
     logger.info("TrakAquire API ready")
+    await sync_telegram_webhooks()
 
 
 @app.on_event("shutdown")

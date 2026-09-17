@@ -1,203 +1,248 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  ReactFlow, ReactFlowProvider, Background, Controls, MiniMap, Handle, Position,
+  addEdge, useNodesState, useEdgesState, useReactFlow, BackgroundVariant,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import api from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Search, Workflow, Plus, Trash2, Play, Pause, Edit } from 'lucide-react';
+import {
+  Workflow, Plus, Trash2, Play, Pause, Edit, ArrowLeft, Save, Rocket,
+  MessageSquare, GitBranch, Clock3, Tags, ListTree, Shuffle, Zap, Bot,
+  Webhook, UserRoundCheck, Radio, BarChart3, ListChecks, RefreshCw,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 const NODE_TYPES = [
-  { type: 'trigger', label: 'Gatilho', desc: 'Iniciar por evento' },
-  { type: 'message', label: 'Mensagem', desc: 'Texto, mídia e botões' },
-  { type: 'question', label: 'Pergunta', desc: 'Coletar resposta' },
-  { type: 'sms', label: 'Enviar SMS', desc: 'Conteúdo tarifado' },
-  { type: 'call', label: 'Ligação', desc: 'Atendeu, caixa postal, não atendeu' },
-  { type: 'condition', label: 'Condição', desc: 'Ramificar conforme dados' },
-  { type: 'wait', label: 'Espera', desc: 'Aguardar entre etapas' },
-  { type: 'ab_test', label: 'Teste A/B', desc: 'Distribuir público' },
-  { type: 'action', label: 'Ação', desc: 'Alterar tag/atributo' },
-  { type: 'conversion', label: 'Conversão', desc: 'Encaminhar evento' },
-  { type: 'ai', label: 'IA', desc: 'Processamento por modelo' },
-  { type: 'handoff', label: 'Atendimento', desc: 'Transferir para humano' },
-  { type: 'jump', label: 'Saltar', desc: 'Encaminhar a outro fluxo' },
+  { type: 'message', label: 'Mensagem', desc: 'Enviar uma mensagem', icon: MessageSquare, color: '#5b8def' },
+  { type: 'condition', label: 'Condição', desc: 'Ramificar Sim/Não', icon: GitBranch, color: '#f5a524' },
+  { type: 'wait', label: 'Espera', desc: 'Aguardar um tempo', icon: Clock3, color: '#60a5fa' },
+  { type: 'crm_action', label: 'Ações CRM', desc: 'Mover/criar lead', icon: ListTree, color: '#16c7a3' },
+  { type: 'tags', label: 'Gerenciar Tags', desc: 'Aplicar/remover tags', icon: Tags, color: '#8b5cf6' },
+  { type: 'menu', label: 'Menu', desc: 'Menu de N opções', icon: ListTree, color: '#fb8b72' },
+  { type: 'random', label: 'Randomizador', desc: 'Caminho aleatório', icon: Shuffle, color: '#ec4899' },
+  { type: 'action', label: 'Ação Automática', desc: 'Executar ação', icon: Zap, color: '#f59e0b' },
+  { type: 'ai', label: 'Inteligência IA', desc: 'Acionar/pausar IA', icon: Bot, color: '#12b8d0' },
+  { type: 'webhook', label: 'Webhook', desc: 'Chamada HTTP', icon: Webhook, color: '#7890aa' },
+  { type: 'handoff', label: 'Transferir', desc: 'Transferir atendimento', icon: UserRoundCheck, color: '#10b981' },
 ];
+
+const iconFor = kind => NODE_TYPES.find(item => item.type === kind)?.icon || Workflow;
+
+function AutomationNode({ data, selected }) {
+  const Icon = data.kind === 'trigger' ? Radio : iconFor(data.kind);
+  const color = data.kind === 'trigger' ? '#19d3ae' : (NODE_TYPES.find(item => item.type === data.kind)?.color || '#7890aa');
+  return (
+    <div className={`flow-node ${selected ? 'is-selected' : ''}`} style={{ '--node-color': color }}>
+      {data.kind !== 'trigger' && <Handle type="target" position={Position.Top} />}
+      <div className="flow-node-title"><span className="flow-node-icon"><Icon size={13} /></span>{data.label}</div>
+      <div className="flow-node-description">{data.description || 'Configure esta etapa'}</div>
+      <Handle type="source" position={Position.Bottom} />
+    </div>
+  );
+}
+
+const flowNodeTypes = { automation: AutomationNode };
+
+function normalizeNodes(nodes = []) {
+  if (!nodes.length) {
+    return [{ id: 'trigger', type: 'automation', position: { x: 360, y: 160 }, data: { kind: 'trigger', label: 'Início', description: 'Quando o lead enviar mensagem', config: {} }, deletable: false }];
+  }
+  return nodes.map((node, index) => ({
+    ...node, type: 'automation', position: node.position || { x: 360, y: 160 + index * 130 },
+    data: node.data || { kind: node.type === 'trigger' ? 'trigger' : node.type, label: node.label || node.type, description: NODE_TYPES.find(item => item.type === node.type)?.desc, config: node.config || {} },
+    deletable: node.id !== 'trigger',
+  }));
+}
+
+function FlowEditor({ automation, connections, onClose, onSaved }) {
+  const [nodes, setNodes, onNodesChange] = useNodesState(normalizeNodes(automation.nodes));
+  const [edges, setEdges, onEdgesChange] = useEdgesState(automation.edges || []);
+  const [connectionId, setConnectionId] = useState(automation.connection_id || '');
+  const [selectedNodeId, setSelectedNodeId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [analytics, setAnalytics] = useState(null);
+  const [executions, setExecutions] = useState(null);
+  const [panelLoading, setPanelLoading] = useState(false);
+  const { screenToFlowPosition } = useReactFlow();
+  const selectedNode = nodes.find(node => node.id === selectedNodeId);
+
+  const addNodeAt = useCallback((kind, position) => {
+    const definition = NODE_TYPES.find(item => item.type === kind);
+    if (!definition) return;
+    const id = `${kind}_${Date.now()}`;
+    setNodes(current => [...current, { id, type: 'automation', position, data: { kind, label: definition.label, description: definition.desc, config: {} } }]);
+    setSelectedNodeId(id);
+  }, [setNodes]);
+
+  const onDrop = useCallback(event => {
+    event.preventDefault();
+    const kind = event.dataTransfer.getData('application/reactflow');
+    if (kind) addNodeAt(kind, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+  }, [addNodeAt, screenToFlowPosition]);
+
+  const updateSelected = (field, value) => setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, [field]: value } } : node));
+  const updateConfig = (field, value) => setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config: { ...(node.data.config || {}), [field]: value } } } : node));
+
+  const save = async (publish = false) => {
+    if (!connectionId) return toast.error('Selecione a conexão que executará esta automação');
+    setSaving(true);
+    try {
+      await api.put(`/automations/${automation._id}`, {
+        nodes, edges, connection_id: connectionId,
+        trigger: { type: 'message', event: 'message_received' },
+        ...(publish ? { status: 'active' } : {}),
+      });
+      toast.success(publish ? 'Automação publicada' : 'Fluxo salvo');
+      onSaved();
+      if (publish) onClose();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao salvar o fluxo'); }
+    finally { setSaving(false); }
+  };
+
+  const openAnalytics = async () => {
+    setPanelLoading(true); setAnalytics({ loading: true });
+    try { const { data } = await api.get(`/automations/${automation._id}/analytics`); setAnalytics(data); }
+    catch { toast.error('Erro ao carregar analytics'); setAnalytics(null); }
+    finally { setPanelLoading(false); }
+  };
+
+  const openExecutions = async () => {
+    setPanelLoading(true); setExecutions({ items: [], loading: true });
+    try { const { data } = await api.get(`/automations/${automation._id}/executions`); setExecutions(data); }
+    catch { toast.error('Erro ao carregar execuções'); setExecutions(null); }
+    finally { setPanelLoading(false); }
+  };
+
+  return (
+    <div className="automation-editor" data-testid="automation-editor">
+      <header className="automation-editor-header">
+        <Button variant="ghost" size="icon" onClick={onClose} aria-label="Voltar"><ArrowLeft size={17} /></Button>
+        <div className="automation-title"><strong>{automation.name}</strong><span>{nodes.length} blocos · {edges.length} conexões</span></div>
+        <div className="automation-header-actions">
+          <Button variant="ghost" size="sm" onClick={openAnalytics}><BarChart3 size={13} className="mr-2" />Analytics</Button>
+          <Button variant="ghost" size="sm" onClick={openExecutions}><ListChecks size={13} className="mr-2" />Execuções</Button>
+          <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving}><Save size={13} className="mr-2" />Salvar</Button>
+          <Button size="sm" onClick={() => save(true)} disabled={saving}><Rocket size={13} className="mr-2" />Publicar</Button>
+        </div>
+      </header>
+
+      <div className="automation-editor-body">
+        <aside className="flow-palette">
+          <p className="flow-section-title">BLOCOS BÁSICOS</p>
+          {NODE_TYPES.slice(0, 4).map(item => <PaletteItem key={item.type} item={item} onAdd={() => addNodeAt(item.type, { x: 360, y: 220 + nodes.length * 30 })} />)}
+          <p className="flow-section-title flow-section-spaced">LÓGICA AVANÇADA</p>
+          {NODE_TYPES.slice(4).map(item => <PaletteItem key={item.type} item={item} onAdd={() => addNodeAt(item.type, { x: 360, y: 220 + nodes.length * 30 })} />)}
+        </aside>
+
+        <main className="flow-canvas" onDrop={onDrop} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; }}>
+          <ReactFlow nodes={nodes} edges={edges} nodeTypes={flowNodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+            onConnect={connection => setEdges(current => addEdge({ ...connection, type: 'smoothstep', animated: true }, current))}
+            onSelectionChange={({ nodes: selected }) => setSelectedNodeId(selected[0]?.id || null)} fitView colorMode="dark"
+            defaultEdgeOptions={{ type: 'smoothstep', style: { stroke: '#3d6d68' } }} deleteKeyCode={['Backspace', 'Delete']}>
+            <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="#1d4944" />
+            <Controls showInteractive={false} />
+            <MiniMap pannable zoomable nodeColor={node => node.data.kind === 'trigger' ? '#19d3ae' : '#5277d8'} maskColor="rgba(3, 22, 20, .78)" />
+          </ReactFlow>
+        </main>
+
+        <aside className="flow-settings">
+          <p className="flow-settings-heading">Configuração do fluxo</p>
+          <div className="flow-field"><Label>Conexão que executará</Label><Select value={connectionId} onValueChange={setConnectionId}><SelectTrigger data-testid="automation-connection"><SelectValue placeholder="Selecione WhatsApp ou Telegram" /></SelectTrigger><SelectContent>{connections.map(connection => <SelectItem key={connection._id} value={connection._id}>{connection.name} · {connection.provider === 'whatsapp' ? 'WhatsApp' : 'Telegram'}</SelectItem>)}</SelectContent></Select><small>Leads que enviarem mensagem nesta conexão entrarão no fluxo.</small></div>
+          <div className="trigger-summary"><Radio size={15} /><div><strong>Mensagem recebida</strong><span>Gatilho inicial desta automação</span></div></div>
+          {selectedNode && selectedNode.data.kind !== 'trigger' ? (
+            <div className="node-settings"><div className="flow-settings-heading">Bloco selecionado</div>
+              <div className="flow-field"><Label>Nome</Label><Input value={selectedNode.data.label || ''} onChange={event => updateSelected('label', event.target.value)} /></div>
+              <div className="flow-field"><Label>Descrição</Label><Input value={selectedNode.data.description || ''} onChange={event => updateSelected('description', event.target.value)} /></div>
+              {selectedNode.data.kind === 'message' && <div className="flow-field"><Label>Mensagem</Label><Textarea rows={5} placeholder="Olá! Como posso ajudar?" value={selectedNode.data.config?.text || ''} onChange={event => updateConfig('text', event.target.value)} /></div>}
+              {selectedNode.data.kind === 'wait' && <div className="flow-field"><Label>Espera (minutos)</Label><Input type="number" min="1" value={selectedNode.data.config?.minutes || ''} onChange={event => updateConfig('minutes', event.target.value)} /></div>}
+              {selectedNode.data.kind === 'webhook' && <div className="flow-field"><Label>URL</Label><Input placeholder="https://..." value={selectedNode.data.config?.url || ''} onChange={event => updateConfig('url', event.target.value)} /></div>}
+              <Button variant="outline" className="w-full text-destructive" onClick={() => { setNodes(current => current.filter(node => node.id !== selectedNodeId)); setEdges(current => current.filter(edge => edge.source !== selectedNodeId && edge.target !== selectedNodeId)); setSelectedNodeId(null); }}><Trash2 size={13} className="mr-2" />Excluir bloco</Button>
+            </div>
+          ) : <p className="flow-settings-empty">Selecione um bloco para editar suas propriedades.</p>}
+        </aside>
+      </div>
+      <AutomationAnalyticsDialog open={!!analytics} data={analytics} nodes={nodes} name={automation.name} loading={panelLoading} onClose={() => setAnalytics(null)} onRefresh={openAnalytics} />
+      <AutomationExecutionsDialog open={!!executions} data={executions} loading={panelLoading} onClose={() => setExecutions(null)} onRefresh={openExecutions} />
+    </div>
+  );
+}
+
+function PaletteItem({ item, onAdd }) {
+  const Icon = item.icon;
+  return <button type="button" className="palette-item" draggable onDragStart={event => { event.dataTransfer.setData('application/reactflow', item.type); event.dataTransfer.effectAllowed = 'move'; }} onClick={onAdd}><span style={{ background: item.color }}><Icon size={15} /></span><div><strong>{item.label}</strong><small>{item.desc}</small></div></button>;
+}
+
+function AutomationAnalyticsDialog({ open, data, nodes, name, loading, onClose, onRefresh }) {
+  const metrics = [
+    ['Total', data?.total || 0], ['Concluídas', data?.completed || 0], ['Aguardando', data?.waiting || 0],
+    ['Falhas', data?.failed || 0], ['Conversão', `${data?.conversion_rate || 0}%`], ['Tempo médio', `${data?.average_minutes || 0} min`],
+  ];
+  const maxHits = Math.max(1, ...Object.values(data?.node_hits || {}));
+  return <Dialog open={open} onOpenChange={value => !value && onClose()}><DialogContent className="automation-data-dialog max-w-4xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><BarChart3 size={16} />Analytics · {name}</DialogTitle></DialogHeader>
+    <DialogDescription className="sr-only">Métricas, funil por bloco e execuções recentes desta automação.</DialogDescription>
+    <Button variant="ghost" size="icon" className="dialog-refresh" onClick={onRefresh} disabled={loading}><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></Button>
+    <div className="analytics-metrics">{metrics.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}</div>
+    <div className="automation-data-section"><h4>Funil por bloco</h4>{nodes.length ? <div className="node-funnel">{nodes.map(node => { const hits = data?.node_hits?.[node.id] || (node.data.kind === 'trigger' ? data?.total || 0 : 0); return <div key={node.id}><div><span>{node.data.label}</span><strong>{hits}</strong></div><i style={{ width: `${Math.max(3, hits / maxHits * 100)}%` }} /></div>; })}</div> : <p>Sem blocos configurados.</p>}</div>
+    <div className="automation-data-section"><h4>Últimas execuções — onde cada lead chegou</h4>{data?.recent?.length ? <div className="recent-runs">{data.recent.map(run => <div key={run._id}><Badge variant="outline">{run.status}</Badge><span>{run.current_node_id || 'Gatilho inicial'}</span><time>{new Date(run.created_at).toLocaleString('pt-BR')}</time></div>)}</div> : <p>Sem execuções registradas ainda.</p>}</div>
+  </DialogContent></Dialog>;
+}
+
+function AutomationExecutionsDialog({ open, data, loading, onClose, onRefresh }) {
+  return <Dialog open={open} onOpenChange={value => !value && onClose()}><DialogContent className="automation-data-dialog max-w-4xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><ListChecks size={16} />Execuções do fluxo</DialogTitle></DialogHeader>
+    <DialogDescription className="sr-only">Lista de leads que entraram neste fluxo e o estado atual de cada execução.</DialogDescription>
+    <Button variant="ghost" size="icon" className="dialog-refresh" onClick={onRefresh} disabled={loading}><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></Button>
+    {data?.items?.length ? <div className="executions-table"><Table><TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Status</TableHead><TableHead>Etapa atual</TableHead><TableHead>Início</TableHead></TableRow></TableHeader><TableBody>{data.items.map(run => <TableRow key={run._id}><TableCell>{run.player_name}</TableCell><TableCell><Badge variant="outline">{run.status}</Badge></TableCell><TableCell>{run.current_node_id || 'Gatilho inicial'}</TableCell><TableCell>{new Date(run.created_at).toLocaleString('pt-BR')}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="automation-empty-runs"><ListChecks size={28} /><p>Nenhuma execução registrada ainda.</p><span>Ative o fluxo para começar.</span></div>}
+    <div className="executions-footnote">Clique em uma linha para ver o log detalhado.</div>
+  </DialogContent></Dialog>;
+}
 
 export default function AutomationsPage() {
   const [items, setItems] = useState([]);
+  const [connections, setConnections] = useState([]);
   const [total, setTotal] = useState(0);
   const [statusFilter, setStatusFilter] = useState('all');
   const [showCreate, setShowCreate] = useState(false);
   const [showEditor, setShowEditor] = useState(null);
-  const [form, setForm] = useState({ name: '', trigger: { type: 'event', event: '' }, nodes: [] });
-  const [editNodes, setEditNodes] = useState([]);
+  const [form, setForm] = useState({ name: '', connection_id: '' });
 
   const load = useCallback(async () => {
     try {
-      const p = new URLSearchParams();
-      if (statusFilter !== 'all') p.set('status', statusFilter);
-      const { data } = await api.get(`/automations?${p}`);
-      setItems(data.items); setTotal(data.total);
-    } catch {}
+      const params = new URLSearchParams();
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+      const [automations, integrations] = await Promise.all([api.get(`/automations?${params}`), api.get('/integrations?category=messaging&limit=100')]);
+      setItems(automations.data.items); setTotal(automations.data.total);
+      setConnections(integrations.data.items.filter(item => ['telegram', 'whatsapp'].includes(item.provider)));
+    } catch { toast.error('Erro ao carregar automações'); }
   }, [statusFilter]);
   useEffect(() => { load(); }, [load]);
+  const connectionNames = useMemo(() => Object.fromEntries(connections.map(item => [item._id, item.name])), [connections]);
 
-  const handleCreate = async (e) => {
-    e.preventDefault();
+  const handleCreate = async event => {
+    event.preventDefault();
+    if (!form.connection_id) return toast.error('Selecione uma conexão');
     try {
-      await api.post('/automations', form);
-      toast.success('Automação criada'); setShowCreate(false);
-      setForm({ name: '', trigger: { type: 'event', event: '' }, nodes: [] }); load();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Erro'); }
+      const { data } = await api.post('/automations', { name: form.name, connection_id: form.connection_id, trigger: { type: 'message', event: 'message_received' }, nodes: normalizeNodes([]), edges: [], status: 'draft' });
+      setShowCreate(false); setForm({ name: '', connection_id: '' }); setShowEditor(data); load();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao criar'); }
   };
+  const openEditor = async id => { try { const { data } = await api.get(`/automations/${id}`); setShowEditor(data); } catch { toast.error('Erro ao abrir automação'); } };
+  const toggleStatus = async item => { const status = item.status === 'active' ? 'paused' : 'active'; try { await api.put(`/automations/${item._id}`, { status }); toast.success(status === 'active' ? 'Automação ativada' : 'Automação pausada'); load(); } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao alterar status'); } };
+  const remove = async id => { if (!window.confirm('Remover automação?')) return; try { await api.delete(`/automations/${id}`); toast.success('Automação removida'); load(); } catch { toast.error('Erro ao remover'); } };
 
-  const toggleStatus = async (item) => {
-    const newStatus = item.status === 'active' ? 'paused' : item.status === 'paused' ? 'active' : 'active';
-    try {
-      await api.put(`/automations/${item._id}`, { status: newStatus });
-      toast.success(`Automação ${newStatus === 'active' ? 'ativada' : 'pausada'}`); load();
-    } catch { toast.error('Erro'); }
-  };
+  if (showEditor) return <ReactFlowProvider><FlowEditor automation={showEditor} connections={connections} onClose={() => setShowEditor(null)} onSaved={load} /></ReactFlowProvider>;
 
-  const openEditor = async (id) => {
-    try {
-      const { data } = await api.get(`/automations/${id}`);
-      setShowEditor(data);
-      setEditNodes(data.nodes || []);
-    } catch {}
-  };
-
-  const addNode = (type) => {
-    const nt = NODE_TYPES.find(n => n.type === type);
-    setEditNodes(prev => [...prev, { id: `node_${Date.now()}`, type, label: nt?.label || type, config: {} }]);
-  };
-
-  const removeNode = (idx) => setEditNodes(prev => prev.filter((_, i) => i !== idx));
-
-  const saveNodes = async () => {
-    if (!showEditor) return;
-    try {
-      await api.put(`/automations/${showEditor._id}`, { nodes: editNodes });
-      toast.success('Fluxo salvo'); load();
-    } catch { toast.error('Erro ao salvar'); }
-  };
-
-  const handleDelete = async (id) => {
-    if (!window.confirm('Remover automação?')) return;
-    try { await api.delete(`/automations/${id}`); toast.success('Removida'); load(); } catch { toast.error('Erro'); }
-  };
-
-  const statusColors = { draft: '', active: 'badge-success', paused: 'badge-warning' };
-
-  return (
-    <div data-testid="automations-page">
-      <div className="page-header">
-        <div><h1>Automações<span className="accent">.</span></h1><p className="page-description">Fluxos automatizados com gatilhos, condições e ações.</p></div>
-        <Button onClick={() => setShowCreate(true)} data-testid="create-automation-btn"><Plus size={14} className="mr-2" /> Novo fluxo</Button>
-      </div>
-      <div className="data-toolbar">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-xs">Todos</SelectItem>
-            <SelectItem value="draft" className="text-xs">Rascunho</SelectItem>
-            <SelectItem value="active" className="text-xs">Ativo</SelectItem>
-            <SelectItem value="paused" className="text-xs">Pausado</SelectItem>
-          </SelectContent>
-        </Select>
-        <Badge variant="outline" className="text-[9px] ml-auto">{total} automações</Badge>
-      </div>
-
-      <div className="stat-card" style={{ overflow: 'auto' }}>
-        <Table>
-          <TableHeader><TableRow>
-            <TableHead className="text-xs">Nome</TableHead>
-            <TableHead className="text-xs">Status</TableHead>
-            <TableHead className="text-xs">Versão</TableHead>
-            <TableHead className="text-xs">Nós</TableHead>
-            <TableHead className="text-xs">Execuções</TableHead>
-            <TableHead className="text-xs">Conversões</TableHead>
-            <TableHead className="text-xs text-right">Ações</TableHead>
-          </TableRow></TableHeader>
-          <TableBody>
-            {items.length === 0 ? (
-              <TableRow><TableCell colSpan={7}><div className="empty-state"><Workflow size={32} /><h3>Nenhuma automação</h3><p>Crie fluxos para automatizar jornadas de aquisição.</p></div></TableCell></TableRow>
-            ) : items.map(a => (
-              <TableRow key={a._id}>
-                <TableCell className="text-xs font-medium">{a.name}</TableCell>
-                <TableCell><Badge className={`text-[9px] ${statusColors[a.status] || ''}`}>{a.status}</Badge></TableCell>
-                <TableCell className="text-xs">v{a.version || 1}</TableCell>
-                <TableCell className="text-xs">{(a.nodes || []).length}</TableCell>
-                <TableCell className="text-xs">{a.executions || 0}</TableCell>
-                <TableCell className="text-xs">{a.conversions || 0}</TableCell>
-                <TableCell className="text-right">
-                  <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditor(a._id)} data-testid={`edit-${a._id}`}><Edit size={13} /></Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleStatus(a)}>{a.status === 'active' ? <Pause size={13} /> : <Play size={13} />}</Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(a._id)}><Trash2 size={13} /></Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Create Dialog */}
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent data-testid="create-automation-dialog">
-          <DialogHeader><DialogTitle>Novo fluxo</DialogTitle></DialogHeader>
-          <form onSubmit={handleCreate} className="space-y-3">
-            <div><Label className="text-xs">Nome</Label><Input className="text-xs mt-1" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></div>
-            <div><Label className="text-xs">Gatilho</Label><Input className="text-xs mt-1" value={form.trigger.event} onChange={e => setForm(f => ({ ...f, trigger: { ...f.trigger, event: e.target.value } }))} placeholder="Ex: click, register, ftd..." /></div>
-            <DialogFooter><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button><Button type="submit" data-testid="submit-automation">Criar rascunho</Button></DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Flow Editor */}
-      <Dialog open={!!showEditor} onOpenChange={() => setShowEditor(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto" data-testid="automation-editor">
-          <DialogHeader><DialogTitle>Editor: {showEditor?.name}</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-[200px_1fr] gap-4">
-            {/* Node palette */}
-            <div className="space-y-1">
-              <p className="text-[10px] text-muted-foreground mb-2 font-medium">PALETA DE NÓS</p>
-              {NODE_TYPES.map(nt => (
-                <Button key={nt.type} variant="outline" size="sm" className="w-full justify-start text-[10px] h-7 gap-2" onClick={() => addNode(nt.type)}>
-                  <Plus size={10} /> {nt.label}
-                </Button>
-              ))}
-            </div>
-            {/* Canvas */}
-            <div className="space-y-2 min-h-[300px]">
-              <p className="text-[10px] text-muted-foreground font-medium">FLUXO ({editNodes.length} nós)</p>
-              {editNodes.length === 0 ? (
-                <div className="text-center text-[10px] text-muted-foreground py-12">Adicione nós da paleta ao lado.</div>
-              ) : editNodes.map((node, i) => (
-                <div key={node.id} className="flex items-center gap-2 p-2 rounded-md border border-border bg-card">
-                  <Badge variant="outline" className="text-[8px]">{i + 1}</Badge>
-                  <div className="flex-1">
-                    <span className="text-[10px] font-medium">{node.label}</span>
-                    <span className="text-[9px] text-muted-foreground ml-2">{NODE_TYPES.find(n => n.type === node.type)?.desc}</span>
-                  </div>
-                  <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeNode(i)}><Trash2 size={10} /></Button>
-                </div>
-              ))}
-              {editNodes.length > 0 && (
-                <div className="flex gap-2 pt-2">
-                  <Button size="sm" className="text-xs" onClick={saveNodes}>Salvar fluxo</Button>
-                  <Button size="sm" variant="outline" className="text-xs" onClick={() => { saveNodes(); toggleStatus(showEditor); }}>Publicar</Button>
-                </div>
-              )}
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+  return <div data-testid="automations-page">
+    <div className="page-header"><div><h1>Automações<span className="accent">.</span></h1><p className="page-description">Crie jornadas visuais acionadas pelas suas conexões de mensagem.</p></div><Button onClick={() => setShowCreate(true)} data-testid="create-automation-btn"><Plus size={14} className="mr-2" />Nova automação</Button></div>
+    <div className="data-toolbar"><Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="draft">Rascunho</SelectItem><SelectItem value="active">Ativo</SelectItem><SelectItem value="paused">Pausado</SelectItem></SelectContent></Select><Badge variant="outline" className="text-[9px] ml-auto">{total} automações</Badge></div>
+    <div className="stat-card" style={{ overflow: 'auto' }}><Table><TableHeader><TableRow><TableHead>Nome</TableHead><TableHead>Conexão</TableHead><TableHead>Status</TableHead><TableHead>Fluxo</TableHead><TableHead>Execuções</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>{items.length === 0 ? <TableRow><TableCell colSpan={6}><div className="empty-state"><Workflow size={32} /><h3>Nenhuma automação</h3><p>Crie um fluxo e conecte-o ao WhatsApp ou Telegram.</p></div></TableCell></TableRow> : items.map(item => <TableRow key={item._id}><TableCell className="text-xs font-medium">{item.name}</TableCell><TableCell className="text-xs">{connectionNames[item.connection_id] || 'Não selecionada'}</TableCell><TableCell><Badge className={`text-[9px] ${item.status === 'active' ? 'badge-success' : item.status === 'paused' ? 'badge-warning' : ''}`}>{item.status}</Badge></TableCell><TableCell className="text-xs">{(item.nodes || []).length} blocos · {(item.edges || []).length} conexões</TableCell><TableCell className="text-xs">{item.executions || 0}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditor(item._id)}><Edit size={13} /></Button><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleStatus(item)}>{item.status === 'active' ? <Pause size={13} /> : <Play size={13} />}</Button><Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item._id)}><Trash2 size={13} /></Button></div></TableCell></TableRow>)}</TableBody></Table></div>
+    <Dialog open={showCreate} onOpenChange={setShowCreate}><DialogContent data-testid="create-automation-dialog"><DialogHeader><DialogTitle>Nova automação</DialogTitle></DialogHeader><form onSubmit={handleCreate} className="space-y-4"><div><Label>Nome</Label><Input className="mt-1" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} placeholder="Ex.: Boas-vindas Telegram" required /></div><div><Label>Conexão</Label><Select value={form.connection_id} onValueChange={value => setForm(current => ({ ...current, connection_id: value }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Selecione WhatsApp ou Telegram" /></SelectTrigger><SelectContent>{connections.map(connection => <SelectItem key={connection._id} value={connection._id}>{connection.name} · {connection.provider}</SelectItem>)}</SelectContent></Select><p className="text-[10px] text-muted-foreground mt-1">Mensagens recebidas nesta conexão iniciarão o fluxo.</p></div>{connections.length === 0 && <div className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900 rounded-md p-3">Configure primeiro uma integração de WhatsApp ou Telegram.</div>}<DialogFooter><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button><Button type="submit" disabled={!connections.length} data-testid="submit-automation">Criar e editar</Button></DialogFooter></form></DialogContent></Dialog>
+  </div>;
 }

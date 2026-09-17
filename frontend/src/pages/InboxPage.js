@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { MessageSquare, Send, User, Clock } from 'lucide-react';
+import LeadDetailsPanel from '@/components/LeadDetailsPanel';
+import { MessageSquare, Send, User, Clock, Radio, PanelRightOpen } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function InboxPage() {
@@ -14,6 +15,8 @@ export default function InboxPage() {
   const [detail, setDetail] = useState(null);
   const [message, setMessage] = useState('');
   const [search, setSearch] = useState('');
+  const [realtime, setRealtime] = useState('connecting');
+  const [showLeadPanel, setShowLeadPanel] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -26,11 +29,27 @@ export default function InboxPage() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    const stream = new EventSource(`${api.defaults.baseURL}/inbox/events`, { withCredentials: true });
+    stream.addEventListener('connected', () => setRealtime('connected'));
+    stream.addEventListener('inbox', event => {
+      setRealtime('connected');
+      load();
+      try {
+        const payload = JSON.parse(event.data);
+        if (selected && payload.conversation_id === selected) loadConversation(selected);
+      } catch {}
+    });
+    stream.onerror = () => setRealtime('reconnecting');
+    return () => stream.close();
+  }, [load, selected]);
+
   const loadConversation = async (id) => {
     try {
       const { data } = await api.get(`/inbox/${id}`);
       setDetail(data);
       setSelected(id);
+      setShowLeadPanel(true);
     } catch { toast.error('Erro ao abrir conversa'); }
   };
 
@@ -68,9 +87,13 @@ export default function InboxPage() {
   const statusColors = { queue: 'badge-warning', active: 'badge-info', resolved: 'badge-success' };
 
   return (
-    <div data-testid="inbox-page" style={{ display: 'flex', gap: '12px', height: 'calc(100vh - 120px)' }}>
+    <div data-testid="inbox-page" className="inbox-workspace">
       {/* Conversation List */}
-      <div style={{ width: '300px', flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div className="inbox-conversation-list">
+        <div className="flex items-center justify-between mb-2 px-1">
+          <span className="text-[10px] font-medium">Conversas</span>
+          <span className={`text-[9px] flex items-center gap-1 ${realtime === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`}><Radio size={10} />{realtime === 'connected' ? 'Tempo real' : 'Reconectando'}</span>
+        </div>
         <Input placeholder="Buscar conversa..." value={search} onChange={e => setSearch(e.target.value)} className="text-xs h-8 mb-2" data-testid="inbox-search" />
         <ScrollArea className="flex-1 stat-card p-0">
           {conversations.length === 0 ? (
@@ -87,12 +110,13 @@ export default function InboxPage() {
             >
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium truncate">{conv.player_name || 'Sem nome'}</span>
-                <Badge className={`text-[8px] ${statusColors[conv.status] || ''}`}>{conv.status}</Badge>
+                <div className="flex items-center gap-1">{conv.unread_count > 0 && <Badge className="text-[8px] min-w-5 justify-center">{conv.unread_count}</Badge>}<Badge className={`text-[8px] ${statusColors[conv.status] || ''}`}>{conv.status}</Badge></div>
               </div>
               <p className="text-[10px] text-muted-foreground truncate">{conv.last_message || conv.subject || 'Nova conversa'}</p>
               <div className="flex items-center gap-1 mt-1 text-[9px] text-muted-foreground">
                 <Clock size={9} />
                 {new Date(conv.updated_at).toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                <span className="ml-auto capitalize">{conv.channel}</span>
               </div>
             </div>
           ))}
@@ -100,7 +124,7 @@ export default function InboxPage() {
       </div>
 
       {/* Conversation Detail */}
-      <div className="stat-card flex-1 flex flex-col" style={{ minWidth: 0 }}>
+      <div className="stat-card inbox-chat-area">
         {!detail ? (
           <div className="empty-state flex-1">
             <MessageSquare size={36} />
@@ -116,15 +140,16 @@ export default function InboxPage() {
               </div>
               {detail.status === 'queue' && <Button size="sm" className="text-xs h-7" onClick={assumeConversation} data-testid="assume-btn">Assumir</Button>}
               {detail.status !== 'resolved' && <Button size="sm" variant="outline" className="text-xs h-7" onClick={closeConversation} data-testid="close-conv-btn">Encerrar</Button>}
+              <Button size="icon" variant={showLeadPanel ? 'secondary' : 'ghost'} className="h-8 w-8" onClick={() => setShowLeadPanel(value => !value)} aria-label="Mostrar painel de detalhes" title="Mostrar painel de detalhes"><PanelRightOpen size={14} /></Button>
             </div>
             <ScrollArea className="flex-1 p-3">
               <div className="space-y-3">
                 {(detail.messages || []).map(msg => (
-                  <div key={msg._id} className={`flex gap-2 ${msg.type === 'internal_note' ? 'opacity-70' : ''}`}>
+                  <div key={msg._id} className={`flex gap-2 ${msg.type === 'internal_note' ? 'opacity-70' : ''} ${msg.direction === 'outbound' || msg.type === 'reply' ? 'justify-end' : ''}`}>
                     <div className="h-6 w-6 rounded-full bg-accent flex items-center justify-center flex-shrink-0">
                       <User size={10} />
                     </div>
-                    <div className="min-w-0">
+                    <div className={`min-w-0 max-w-[75%] rounded-lg px-3 py-2 ${msg.direction === 'outbound' || msg.type === 'reply' ? 'bg-primary/10 border border-primary/20' : 'bg-muted/60'}`}>
                       <div className="text-[10px] text-muted-foreground mb-0.5">
                         {msg.sender_name || 'Sistema'} · {new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                         {msg.type === 'internal_note' && <Badge className="text-[7px] ml-1 badge-warning">Nota interna</Badge>}
@@ -142,6 +167,7 @@ export default function InboxPage() {
           </>
         )}
       </div>
+      {detail?.lead && showLeadPanel && <LeadDetailsPanel conversation={detail} onRefresh={() => loadConversation(selected)} onArchive={closeConversation} onClose={() => setShowLeadPanel(false)} />}
     </div>
   );
 }

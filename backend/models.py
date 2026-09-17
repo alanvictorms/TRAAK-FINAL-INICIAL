@@ -130,6 +130,22 @@ class MessageCreate(BaseModel):
     content: str
     type: str = "reply"
 
+class LeadDetailUpdate(BaseModel):
+    name: Optional[str] = None
+    status: Optional[str] = None
+    pipeline_stage: Optional[str] = None
+    expert_name: Optional[str] = None
+    budget: Optional[float] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    tags: Optional[List[str]] = None
+    internal_notes: Optional[str] = None
+    blocked: Optional[bool] = None
+
+class LeadTaskCreate(BaseModel):
+    title: str
+    due_at: Optional[str] = None
+
 
 # ── Segments ──
 class SegmentCreate(BaseModel):
@@ -143,6 +159,8 @@ class AutomationCreate(BaseModel):
     name: str
     trigger: Dict[str, Any] = {}
     nodes: List[Dict[str, Any]] = []
+    edges: List[Dict[str, Any]] = []
+    connection_id: Optional[str] = None
     status: str = "draft"
 
 class AutomationUpdate(BaseModel):
@@ -150,6 +168,8 @@ class AutomationUpdate(BaseModel):
     status: Optional[str] = None
     trigger: Optional[Dict[str, Any]] = None
     nodes: Optional[List[Dict[str, Any]]] = None
+    edges: Optional[List[Dict[str, Any]]] = None
+    connection_id: Optional[str] = None
 
 
 # ── Dispatches ──

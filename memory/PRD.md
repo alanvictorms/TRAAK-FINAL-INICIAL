@@ -65,8 +65,8 @@ Plataforma de operação e atribuição para aquisição em iGaming. Conecta: cl
 - F08 Monitoramento: health integrações, DLQ, reprocessamento
 - F09 Players: CRUD, ficha completa (eventos, conversas, tags)
 - F10 Identity Graph: listagem, confiança, PII vault mascaramento/revelação
-- F11 Inbox: conversas, mensagens, assumir, encerrar, notas internas
-- F12 Automações: CRUD, editor com paleta 13 nós, publicar/pausar, versão
+- F11 Inbox: conversas, mensagens, assumir/encerrar, tempo real via SSE e painel CRM do lead com status, responsável, orçamento, contatos, tags, tarefas, financeiro, UTM, notas, engajamento e atividade
+- F12 Automações: CRUD, editor visual React Flow, nós/arestas persistidos, vínculo obrigatório com conexão WhatsApp/Telegram, publicar/pausar, Analytics por bloco e histórico detalhado de execuções
 - F13 Segmentos: builder E/OU, 8 campos, 7 operadores, 4 presets
 - F14 Disparos: compositor com canal/segmento/agendamento, pré-voo
 - F15 Campanhas: CRUD, plataforma, orçamento, métricas
@@ -78,6 +78,8 @@ Plataforma de operação e atribuição para aquisição em iGaming. Conecta: cl
 - P09 Provedores IA: CRUD com provider/model/api_key no admin
 - Copiloto IA: backend SSE streaming, config do admin ou fallback EMERGENT_LLM_KEY
 - TAP Webhook: POST /api/webhooks/tap recebe postback, valida assinatura, deduplica, cria evento + atualiza player
+- Telegram Updates: webhook por conexão, registro via Bot API, deduplicação e ingestão normalizada no Inbox
+- Meta/WhatsApp: verificação e ingestão assinada de mensagens; endpoint CAPI por integração com envio ao Graph e registro no Signal Ledger
 
 ### ⚠️ PARCIAL (funciona mas falta profundidade)
 - F02 Analytics: falta gráficos temporais, funil visual, comparação períodos, KPIs customizáveis

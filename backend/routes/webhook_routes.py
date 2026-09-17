@@ -2,6 +2,8 @@ from fastapi import APIRouter, Request, HTTPException
 from datetime import datetime, timezone
 from database import db
 from bson import ObjectId
+from messaging import ingest_incoming_message
+import httpx
 import hashlib
 import hmac
 import json
@@ -242,3 +244,216 @@ async def tap_webhook(request: Request):
 async def tap_webhook_health():
     """Health check for TAP webhook endpoint"""
     return {"status": "ok", "endpoint": "/api/webhooks/tap", "methods": ["POST"]}
+
+
+async def _messaging_integration(integration_id: str, provider: str = None):
+    if not ObjectId.is_valid(integration_id):
+        raise HTTPException(404, "Integração não encontrada")
+    query = {"_id": ObjectId(integration_id)}
+    if provider:
+        query["provider"] = provider
+    integration = await db.integrations.find_one(query)
+    if not integration:
+        raise HTTPException(404, "Integração não encontrada")
+    return integration
+
+
+@router.post("/telegram/{integration_id}")
+async def telegram_updates(integration_id: str, request: Request):
+    """Receive Bot API updates and normalize messages into the Inbox."""
+    integration = await _messaging_integration(integration_id, "telegram")
+    configured_secret = (integration.get("credentials") or {}).get("webhook_secret")
+    supplied_secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
+    if configured_secret and not hmac.compare_digest(configured_secret, supplied_secret or ""):
+        raise HTTPException(401, "Webhook secret inválido")
+
+    payload = await request.json()
+    logger.info(
+        "Telegram update received integration=%s update_id=%s",
+        integration_id,
+        payload.get("update_id"),
+    )
+    message = (
+        payload.get("message")
+        or payload.get("edited_message")
+        or payload.get("channel_post")
+        or payload.get("edited_channel_post")
+    )
+    if not message:
+        # Telegram retries non-2xx responses; unsupported update types are acked.
+        return {"status": "ignored", "reason": "update sem mensagem"}
+
+    sender = message.get("from") or message.get("sender_chat") or {}
+    chat = message.get("chat") or {}
+    external_user_id = str(sender.get("id") or chat.get("id") or "")
+    external_chat_id = str(chat.get("id") or external_user_id)
+    if not external_user_id or not external_chat_id:
+        return {"status": "ignored", "reason": "remetente ausente"}
+    sender_name = " ".join(filter(None, [sender.get("first_name"), sender.get("last_name")])).strip()
+    sender_name = sender_name or sender.get("title") or sender.get("username") or f"Telegram {external_user_id}"
+    content = message.get("text") or message.get("caption") or "[Mídia recebida]"
+    result = await ingest_incoming_message(
+        integration=integration,
+        external_user_id=external_user_id,
+        external_chat_id=external_chat_id,
+        sender_name=sender_name,
+        content=content,
+        external_message_id=str(message.get("message_id") or payload.get("update_id")),
+        raw_payload=payload,
+    )
+    logger.info(
+        "Telegram update processed integration=%s status=%s conversation=%s",
+        integration_id,
+        result.get("status"),
+        result.get("conversation_id"),
+    )
+    return result
+
+
+@router.get("/telegram/{integration_id}/health")
+async def telegram_webhook_health(integration_id: str):
+    await _messaging_integration(integration_id, "telegram")
+    return {"status": "ok", "provider": "telegram", "integration_id": integration_id}
+
+
+@router.get("/meta/{integration_id}")
+async def meta_webhook_verification(integration_id: str, request: Request):
+    """Meta Webhooks verification handshake (also used by WhatsApp Cloud API)."""
+    integration = await _messaging_integration(integration_id)
+    if integration.get("provider") not in ("meta", "whatsapp"):
+        raise HTTPException(404, "Integração Meta não encontrada")
+    params = request.query_params
+    verify_token = (integration.get("credentials") or {}).get("verify_token") or (
+        integration.get("config") or {}
+    ).get("verify_token")
+    if params.get("hub.mode") == "subscribe" and verify_token and hmac.compare_digest(
+        params.get("hub.verify_token", ""), verify_token
+    ):
+        return int(params.get("hub.challenge", "0"))
+    raise HTTPException(403, "Falha na verificação do webhook")
+
+
+def _verify_meta_signature(body: bytes, signature: str, app_secret: str) -> bool:
+    if not app_secret:
+        return True
+    if not signature or not signature.startswith("sha256="):
+        return False
+    expected = hmac.new(app_secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature[7:])
+
+
+@router.post("/meta/{integration_id}")
+async def meta_updates(integration_id: str, request: Request):
+    """Receive signed Meta webhook updates, including WhatsApp messages."""
+    integration = await _messaging_integration(integration_id)
+    if integration.get("provider") not in ("meta", "whatsapp"):
+        raise HTTPException(404, "Integração Meta não encontrada")
+    body = await request.body()
+    credentials = integration.get("credentials") or {}
+    app_secret = credentials.get("app_secret")
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if app_secret and not _verify_meta_signature(body, signature, app_secret):
+        raise HTTPException(401, "Assinatura Meta inválida")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Payload JSON inválido")
+
+    accepted = []
+    for entry in payload.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value") or {}
+            contacts = {str(c.get("wa_id")): (c.get("profile") or {}).get("name") for c in value.get("contacts", [])}
+            for message in value.get("messages", []):
+                sender_id = str(message.get("from") or "")
+                if not sender_id:
+                    continue
+                msg_type = message.get("type", "text")
+                content = (message.get("text") or {}).get("body")
+                if not content:
+                    content = f"[{msg_type.title()} recebido]"
+                accepted.append(await ingest_incoming_message(
+                    integration=integration,
+                    external_user_id=sender_id,
+                    external_chat_id=sender_id,
+                    sender_name=contacts.get(sender_id) or f"WhatsApp {sender_id}",
+                    content=content,
+                    external_message_id=str(message.get("id")),
+                    raw_payload=message,
+                ))
+    return {"status": "accepted", "messages": accepted}
+
+
+@router.post("/meta/{integration_id}/capi")
+async def meta_capi(integration_id: str, request: Request):
+    """Validate, ledger and forward one server-side conversion to Meta CAPI."""
+    integration = await _messaging_integration(integration_id, "meta")
+    body = await request.body()
+    credentials = integration.get("credentials") or {}
+    app_secret = credentials.get("app_secret")
+    direct_secret = request.headers.get("X-CAPI-Secret", "")
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    if app_secret and not (
+        hmac.compare_digest(app_secret, direct_secret)
+        or _verify_meta_signature(body, signature, app_secret)
+    ):
+        raise HTTPException(401, "Assinatura CAPI inválida")
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Payload JSON inválido")
+    event_name = payload.get("event_name")
+    user_data = payload.get("user_data")
+    if not event_name or not isinstance(user_data, dict) or not user_data:
+        raise HTTPException(400, "event_name e user_data são obrigatórios")
+
+    pixel_id = credentials.get("pixel_id")
+    access_token = credentials.get("access_token")
+    if not pixel_id or not access_token:
+        raise HTTPException(400, "Pixel ID e Access Token não configurados")
+    now = datetime.now(timezone.utc)
+    event_id = str(payload.get("event_id") or f"capi-{int(now.timestamp() * 1000)}")
+    existing = await db.events.find_one({
+        "workspace_id": integration["workspace_id"],
+        "source": "meta_capi",
+        "external_id": event_id,
+    })
+    if existing:
+        return {"status": "duplicate", "event_id": str(existing["_id"])}
+
+    capi_event = {
+        "event_name": event_name,
+        "event_time": int(payload.get("event_time") or now.timestamp()),
+        "event_id": event_id,
+        "action_source": payload.get("action_source", "website"),
+        "user_data": user_data,
+        "custom_data": payload.get("custom_data") or {},
+    }
+    if payload.get("event_source_url"):
+        capi_event["event_source_url"] = payload["event_source_url"]
+    graph_version = (integration.get("config") or {}).get("graph_version", "v23.0")
+    async with httpx.AsyncClient(timeout=20) as client:
+        response = await client.post(
+            f"https://graph.facebook.com/{graph_version}/{pixel_id}/events",
+            params={"access_token": access_token},
+            json={"data": [capi_event], **({"test_event_code": payload["test_event_code"]} if payload.get("test_event_code") else {})},
+        )
+    if response.status_code >= 400:
+        logger.error("Meta CAPI error integration=%s response=%s", integration_id, response.text[:500])
+        raise HTTPException(502, "Meta rejeitou o evento CAPI")
+    graph_response = response.json()
+    event_doc = {
+        "workspace_id": integration["workspace_id"],
+        "type": event_name,
+        "person_id": payload.get("person_id"),
+        "source": "meta_capi",
+        "external_id": event_id,
+        "metadata": {"integration_id": integration_id, "graph_response": graph_response},
+        "status": "sent",
+        "fact_at": now,
+        "received_at": now,
+        "created_at": now,
+    }
+    result = await db.events.insert_one(event_doc)
+    await db.integrations.update_one({"_id": integration["_id"]}, {"$set": {"last_sync": now, "status": "active"}})
+    return {"status": "sent", "event_id": str(result.inserted_id), "meta": graph_response}

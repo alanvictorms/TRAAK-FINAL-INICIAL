@@ -30,6 +30,7 @@ const PROVIDERS = [
       { key: 'access_token', label: 'Access Token', type: 'password', required: true },
       { key: 'pixel_id', label: 'Pixel ID', type: 'text', required: true },
       { key: 'ad_account_id', label: 'Ad Account ID', type: 'text', required: true, placeholder: 'act_XXXXXXXXX' },
+      { key: 'verify_token', label: 'Webhook Verify Token', type: 'text', required: false },
     ],
     capabilities: ['read_media', 'capi_send', 'cost_sync'],
     docs: 'Conecte sua conta Meta para leitura de campanhas/custos e envio de conversões via CAPI server-side.'
@@ -71,6 +72,7 @@ const PROVIDERS = [
       { key: 'access_token', label: 'Permanent Access Token', type: 'password', required: true },
       { key: 'waba_id', label: 'WhatsApp Business Account ID', type: 'text', required: true },
       { key: 'verify_token', label: 'Webhook Verify Token', type: 'text', required: true },
+      { key: 'app_secret', label: 'App Secret (assinatura)', type: 'password', required: false },
     ],
     capabilities: ['send_message', 'receive_message', 'templates'],
     docs: 'Configure via Meta for Developers. Envio condicionado a elegibilidade, opt-in e políticas (MSG-02).'
@@ -154,7 +156,7 @@ export default function IntegrationsPage() {
         toast.error(`Preencha: ${missing.map(f => f.label).join(', ')}`);
         return;
       }
-      await api.post('/integrations', {
+      const { data } = await api.post('/integrations', {
         provider: provider.id,
         category: provider.category,
         name: provider.name,
@@ -162,7 +164,11 @@ export default function IntegrationsPage() {
         config: {},
         capabilities: provider.capabilities || [],
       });
-      toast.success('Integração criada');
+      if (provider.id === 'telegram' && data.webhook_registration?.status !== 'registered') {
+        toast.error(`Integração salva, mas o webhook falhou: ${data.webhook_registration?.detail || 'erro desconhecido'}`);
+      } else {
+        toast.success(provider.id === 'telegram' ? 'Telegram conectado e webhook registrado' : 'Integração criada');
+      }
       setShowCreate(false);
       setForm({ provider: '' });
       setCredFields({});
@@ -190,6 +196,16 @@ export default function IntegrationsPage() {
       load();
     } catch (err) {
       toast.error('Erro ao remover');
+    }
+  };
+
+  const handleRegisterWebhook = async (id) => {
+    try {
+      await api.post(`/integrations/${id}/webhook/register`);
+      toast.success('Webhook registrado no Telegram');
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Erro ao registrar webhook');
     }
   };
 
@@ -358,6 +374,7 @@ export default function IntegrationsPage() {
                   <div className="text-xs"><span className="text-muted-foreground">Status:</span> <Badge className={`text-[9px] ${statusColors[showDetail.status]}`}>{showDetail.status}</Badge></div>
                   <div className="text-xs"><span className="text-muted-foreground">Criada:</span> {new Date(showDetail.created_at).toLocaleString('pt-BR')}</div>
                   {showDetail.last_test && <div className="text-xs"><span className="text-muted-foreground">Último teste:</span> {showDetail.last_test.status} em {new Date(showDetail.last_test.tested_at).toLocaleString('pt-BR')}</div>}
+                  {showDetail.webhook_error && <div className="text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md p-3"><span className="font-medium">Erro no webhook:</span> {showDetail.webhook_error}</div>}
                   {prov?.docs && <div className="text-[10px] text-muted-foreground bg-muted p-3 rounded-md mt-2">{prov.docs}</div>}
                 </TabsContent>
                 <TabsContent value="config" className="mt-3 space-y-2">
@@ -376,6 +393,21 @@ export default function IntegrationsPage() {
                         {`${window.location.origin}/api/webhooks/tap`}
                       </code>
                       <p className="text-[9px] text-muted-foreground mt-1">Configure esta URL no painel TAP para receber postbacks de registro, FTD, depósito e saque.</p>
+                    </div>
+                  )}
+                  {['telegram', 'meta', 'whatsapp'].includes(showDetail.provider) && (
+                    <div className="stat-card p-3 mt-3">
+                      <p className="text-[10px] font-medium text-foreground mb-1">Webhook URL</p>
+                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">{showDetail.config?.webhook_url || `${window.location.origin}/api/webhooks/${showDetail.provider === 'telegram' ? 'telegram' : 'meta'}/${showDetail._id}`}</code>
+                      {showDetail.provider === 'telegram' && <Button size="sm" className="mt-3 text-xs" onClick={() => handleRegisterWebhook(showDetail._id)}>Registrar no Telegram</Button>}
+                      {showDetail.provider === 'telegram' && <p className="text-[9px] text-muted-foreground mt-2">Em grupos, desative o Privacy Mode no @BotFather para o bot receber mensagens comuns. Comandos, menções e respostas ao bot funcionam com o modo ativo.</p>}
+                    </div>
+                  )}
+                  {showDetail.provider === 'meta' && (
+                    <div className="stat-card p-3 mt-3">
+                      <p className="text-[10px] font-medium text-foreground mb-1">Endpoint CAPI</p>
+                      <code className="text-[9px] bg-muted p-2 rounded block font-mono break-all">{showDetail.config?.capi_url || `${window.location.origin}/api/webhooks/meta/${showDetail._id}/capi`}</code>
+                      <p className="text-[9px] text-muted-foreground mt-1">Eventos server-side são encaminhados à Meta e registrados no Signal Ledger.</p>
                     </div>
                   )}
                 </TabsContent>

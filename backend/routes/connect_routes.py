@@ -4,7 +4,9 @@ from bson import ObjectId
 from database import db
 from auth import get_current_user
 from models import IntegrationCreate, IntegrationUpdate, DomainCreate, DomainUpdate, TrackingLinkCreate
+from telegram_service import public_api_base, register_telegram_webhook
 import math
+import secrets
 
 router = APIRouter(prefix="/api", tags=["connect"])
 
@@ -39,6 +41,7 @@ async def get_integration(integration_id: str, request: Request):
     doc["_id"] = str(doc["_id"])
     if "credentials" in doc:
         doc["credentials_masked"] = {k: "••••••" for k in doc.get("credentials", {})}
+        doc.pop("credentials", None)
     return doc
 
 
@@ -46,15 +49,19 @@ async def get_integration(integration_id: str, request: Request):
 async def create_integration(body: IntegrationCreate, request: Request):
     user = await get_current_user(request)
     now = datetime.now(timezone.utc)
+    config = dict(body.config)
+    credentials = dict(body.credentials)
+    if body.provider == "telegram":
+        credentials["webhook_secret"] = secrets.token_urlsafe(24)
     doc = {
         "workspace_id": user["workspace_id"],
         "provider": body.provider,
         "category": body.category,
         "name": body.name,
         "status": "configured" if body.credentials else "available",
-        "credentials": body.credentials,
+        "credentials": credentials,
         "capabilities": body.capabilities,
-        "config": body.config,
+        "config": config,
         "last_sync": None,
         "last_test": None,
         "created_at": now,
@@ -63,7 +70,27 @@ async def create_integration(body: IntegrationCreate, request: Request):
     }
     result = await db.integrations.insert_one(doc)
     doc["_id"] = str(result.inserted_id)
+    base_url = public_api_base(request)
+    if body.provider == "telegram":
+        config.update({
+            "webhook_url": f"{base_url}/api/webhooks/telegram/{doc['_id']}",
+        })
+    elif body.provider in ("meta", "whatsapp"):
+        config["webhook_url"] = f"{base_url}/api/webhooks/meta/{doc['_id']}"
+        if body.provider == "meta":
+            config["capi_url"] = f"{base_url}/api/webhooks/meta/{doc['_id']}/capi"
+    if config != body.config:
+        await db.integrations.update_one({"_id": result.inserted_id}, {"$set": {"config": config}})
+        doc["config"] = config
+    webhook_registration = None
+    if body.provider == "telegram":
+        registration_doc = {**doc, "_id": result.inserted_id, "credentials": credentials, "config": config}
+        webhook_registration = await register_telegram_webhook(registration_doc, request)
+        doc["status"] = "active" if webhook_registration["status"] == "registered" else "error"
     await _audit(user, "integration.create", str(result.inserted_id), "integration")
+    doc["credentials"] = {k: "••••••" for k in credentials}
+    if webhook_registration:
+        doc["webhook_registration"] = webhook_registration
     return doc
 
 
@@ -111,6 +138,23 @@ async def test_integration(integration_id: str, request: Request):
     test_result = {"status": "success" if doc.get("credentials") else "no_credentials", "tested_at": now.isoformat(), "tested_by": user["_id"]}
     await db.integrations.update_one({"_id": ObjectId(integration_id)}, {"$set": {"last_test": test_result, "updated_at": now}})
     return test_result
+
+
+@router.post("/integrations/{integration_id}/webhook/register")
+async def register_integration_webhook(integration_id: str, request: Request):
+    """Register the generated callback with providers that expose a registration API."""
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(integration_id):
+        raise HTTPException(404, "Integração não encontrada")
+    doc = await db.integrations.find_one({"_id": ObjectId(integration_id), "workspace_id": user["workspace_id"]})
+    if not doc:
+        raise HTTPException(404, "Integração não encontrada")
+    if doc.get("provider") != "telegram":
+        raise HTTPException(400, "Este provedor não exige registro automático de webhook")
+    result = await register_telegram_webhook(doc, request)
+    if result["status"] != "registered":
+        raise HTTPException(502, result["detail"])
+    return result
 
 
 # ── Domains ──
