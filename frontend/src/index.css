@@ -1,0 +1,4 @@
+/* Minimal reset - Waynest CSS handles everything via public/assets/styles.css */
+body {
+  margin: 0;
+}

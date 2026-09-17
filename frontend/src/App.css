@@ -1,0 +1,205 @@
+/* ===== Taxinexo – additional styles on top of Waynest design system ===== */
+
+/* Bottom navigation */
+.bottom-nav{position:fixed;bottom:0;left:0;right:0;z-index:50;background:#fff;border-top:1px solid #eee;display:grid;grid-template-columns:repeat(4,1fr);padding:6px 0 env(safe-area-inset-bottom,8px)}
+.bottom-nav .nav-item{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:9px;color:var(--muted);background:none;border:0;cursor:pointer;position:relative;padding:6px 0}
+.bottom-nav .nav-item.active{color:var(--ink)}
+.bottom-nav .nav-item i{font-size:22px}
+.bottom-nav .nav-badge{position:absolute;top:0;right:calc(50% - 22px);background:var(--danger);color:#fff;font-size:7px;min-width:16px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px}
+
+/* Page with bottom nav padding */
+.page-with-nav{padding-bottom:68px!important}
+
+/* Vehicle card for marketplace */
+.vehicle-list{display:grid;gap:11px;padding:0 15px}
+.vehicle-item{background:#fff;border-radius:var(--radius-md);border:var(--hairline);padding:14px;display:flex;flex-direction:column;gap:8px}
+.vehicle-item-header{display:flex;justify-content:space-between;align-items:center}
+.vehicle-item-header .v-code{font-size:13px;font-weight:600}
+.vehicle-item-header .v-status{display:flex;gap:6px;align-items:center}
+.vehicle-item-header .v-status span{font-size:8px;padding:3px 8px;border-radius:6px;background:var(--success);color:#fff}
+.vehicle-item-header .v-status span.scheduled{background:var(--accent)}
+.vehicle-item-body{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:10px;color:var(--muted)}
+.vehicle-item-body .v-label{font-weight:500;color:var(--ink)}
+.vehicle-item-footer{display:flex;justify-content:space-between;align-items:center;padding-top:8px;border-top:var(--hairline)}
+.vehicle-item-footer .v-price{font-size:16px;font-weight:700;color:var(--ink)}
+.vehicle-item-footer .v-profit{font-size:10px;color:var(--success);font-weight:500}
+.vehicle-item-footer .btn-rent{min-height:38px;padding:0 20px;border-radius:10px;background:var(--ink);color:#fff;font-size:11px;font-weight:600;border:0;cursor:pointer}
+.vehicle-item .v-timer{font-size:9px;color:var(--danger);display:flex;align-items:center;gap:4px}
+
+/* City tabs */
+.city-tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 15px;scrollbar-width:none}
+.city-tabs::-webkit-scrollbar{display:none}
+.city-tab{white-space:nowrap;min-height:32px;padding:0 14px;border-radius:10px;border:0;background:#fff;font-size:10px;font-weight:500;cursor:pointer}
+.city-tab.active{background:var(--ink);color:#fff}
+
+/* Filter row */
+.filter-row{display:flex;gap:6px;padding:0 15px 10px;overflow-x:auto;scrollbar-width:none}
+.filter-row::-webkit-scrollbar{display:none}
+.filter-chip{white-space:nowrap;min-height:30px;padding:0 12px;border-radius:8px;border:var(--hairline);background:#fff;font-size:9px;cursor:pointer;display:flex;align-items:center;gap:4px}
+.filter-chip.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+
+/* Profile area */
+.profile-header{background:var(--ink);color:#fff;padding:20px 16px 24px;border-radius:0 0 24px 24px}
+.profile-user{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.profile-avatar{width:48px;height:48px;border-radius:50%;background:var(--accent);display:grid;place-items:center;font-size:20px;color:#fff}
+.profile-info .p-phone{font-size:14px;font-weight:600}
+.profile-info .p-meta{font-size:9px;color:#c7c9d0;display:flex;gap:8px;margin-top:2px}
+.profile-info .p-meta span{background:rgba(255,255,255,.15);padding:2px 8px;border-radius:6px}
+
+/* Balance cards */
+.balance-section{padding:16px;display:grid;gap:10px}
+.balance-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.balance-card{background:#fff;border-radius:var(--radius-md);padding:14px;border:var(--hairline)}
+.balance-card .b-label{font-size:9px;color:var(--muted)}
+.balance-card .b-value{font-size:18px;font-weight:700;margin-top:2px}
+.balance-actions{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:0 16px}
+.balance-action{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:9px;background:none;border:0;cursor:pointer;color:var(--ink)}
+.balance-action i{width:42px;height:42px;border-radius:12px;background:#f4f3f5;display:grid;place-items:center;font-size:20px}
+
+/* Menu grid */
+.menu-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:16px;background:#fff;border-radius:var(--radius-md);margin:12px 16px;border:var(--hairline)}
+.menu-item{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 0;font-size:8px;color:var(--ink);background:none;border:0;cursor:pointer;text-align:center}
+.menu-item i{font-size:20px;color:var(--muted)}
+
+/* Earnings summary */
+.earnings-card{background:#fff;border-radius:var(--radius-md);margin:0 16px 10px;padding:14px;border:var(--hairline)}
+.earnings-row{display:flex;justify-content:space-between;font-size:10px;padding:5px 0;border-bottom:var(--hairline)}
+.earnings-row:last-child{border:0}
+.earnings-row .e-label{color:var(--muted)}
+.earnings-row .e-value{font-weight:600}
+
+/* News cards */
+.news-list{display:grid;gap:10px;padding:0 15px}
+.news-card{background:#fff;border-radius:var(--radius-md);padding:14px;border:var(--hairline);cursor:pointer}
+.news-card h3{font-size:12px;font-weight:500;margin:0 0 6px;line-height:1.5}
+.news-card .n-date{font-size:9px;color:var(--muted)}
+
+/* Team page */
+.team-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 14px}
+.team-stat{background:#fff;border-radius:var(--radius-md);padding:12px;border:var(--hairline);text-align:center}
+.team-stat .ts-value{font-size:16px;font-weight:700}
+.team-stat .ts-label{font-size:9px;color:var(--muted);margin-top:2px}
+
+.member-list{padding:0 16px;display:grid;gap:8px}
+.member-card{background:#fff;border-radius:14px;padding:12px;border:var(--hairline);display:flex;justify-content:space-between;align-items:center}
+.member-card .m-info{font-size:11px}
+.member-card .m-date{font-size:9px;color:var(--muted);margin-top:2px}
+.member-card .m-value{font-size:12px;font-weight:600;text-align:right}
+.member-card .m-label{font-size:8px;color:var(--muted)}
+
+/* Order list */
+.order-card{background:#fff;border-radius:var(--radius-md);padding:14px;border:var(--hairline);margin-bottom:10px}
+.order-card .o-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.order-card .o-id{font-size:9px;color:var(--muted)}
+.order-card .o-status{font-size:9px;padding:3px 8px;border-radius:6px;background:#e8f5e9;color:var(--success);font-weight:500}
+.order-card .o-body{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px}
+.order-card .o-label{color:var(--muted)}
+
+/* Trip record */
+.trip-record{background:#fff;border-radius:12px;padding:12px;border:var(--hairline);margin-bottom:8px;font-size:10px}
+.trip-record .tr-row{display:flex;justify-content:space-between;padding:3px 0}
+.trip-record .tr-label{color:var(--muted)}
+
+/* Fragment cards */
+.fragment-card{background:#fff;border-radius:var(--radius-md);padding:14px;border:var(--hairline);margin-bottom:10px}
+.fragment-card .f-name{font-size:14px;font-weight:600}
+.fragment-card .f-progress-bar{height:6px;border-radius:3px;background:#eee;margin:10px 0 6px;overflow:hidden}
+.fragment-card .f-progress-fill{height:100%;border-radius:3px;background:var(--accent)}
+.fragment-card .f-meta{font-size:9px;color:var(--muted);display:flex;justify-content:space-between}
+
+/* Task page */
+.task-prize{background:#fff;border-radius:var(--radius-md);padding:16px;margin:0 16px 12px;border:var(--hairline)}
+.task-prize h3{font-size:13px;margin:0 0 10px}
+.task-prize-items{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.task-prize-item{background:var(--subtle);border-radius:10px;padding:10px;text-align:center}
+.task-prize-item .tp-value{font-size:14px;font-weight:700;color:var(--success)}
+.task-prize-item .tp-label{font-size:9px;color:var(--muted);margin-top:2px}
+
+.task-card{background:#fff;border-radius:var(--radius-md);padding:14px;margin:0 16px 12px;border:var(--hairline)}
+.task-card .t-status{font-size:9px;padding:3px 8px;border-radius:6px;background:#fff3e0;color:#ef6c00;font-weight:500;display:inline-block;margin-bottom:8px}
+.task-card .t-goal{font-size:12px;font-weight:500;margin-bottom:6px}
+.task-card .t-progress{display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted)}
+.task-card .t-progress-bar{flex:1;height:5px;border-radius:3px;background:#eee;overflow:hidden}
+.task-card .t-progress-fill{height:100%;border-radius:3px;background:var(--accent)}
+
+/* Invite page */
+.invite-card{background:#fff;border-radius:var(--radius-md);padding:20px;margin:0 16px;border:var(--hairline);text-align:center}
+.invite-code{font-size:28px;font-weight:700;letter-spacing:4px;margin:12px 0}
+.invite-link{font-size:9px;color:var(--muted);word-break:break-all;padding:10px;background:var(--subtle);border-radius:10px;margin:12px 0}
+.invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+
+/* PIX card */
+.pix-card{background:#fff;border-radius:var(--radius-md);padding:14px;margin:0 16px 10px;border:var(--hairline);display:flex;justify-content:space-between;align-items:center}
+.pix-card .pix-info .pix-type{font-size:9px;color:var(--muted)}
+.pix-card .pix-info .pix-name{font-size:12px;font-weight:500;margin-top:2px}
+.pix-card .pix-info .pix-key{font-size:10px;color:var(--muted);margin-top:1px}
+
+/* Coupon tabs */
+.coupon-tabs{display:flex;gap:0;padding:0 16px;margin-bottom:14px}
+.coupon-tab{flex:1;text-align:center;padding:10px;font-size:11px;border-bottom:2px solid transparent;background:none;border-left:0;border-right:0;border-top:0;cursor:pointer;color:var(--muted)}
+.coupon-tab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
+
+/* Contract */
+.contract-body{padding:16px;background:#fff;border-radius:var(--radius-md);margin:0 16px;border:var(--hairline);font-size:11px;line-height:1.7;min-height:400px}
+
+/* Gift/redeem */
+.redeem-inputs{display:flex;gap:8px;padding:0 16px;margin:20px 0}
+.redeem-input{flex:1;height:52px;border:1px solid var(--line);border-radius:12px;text-align:center;font-size:18px;font-weight:700;background:#fff}
+
+/* About page */
+.about-section{padding:16px}
+.about-section h2{font-size:15px;margin:0 0 10px}
+.about-team{display:grid;gap:8px}
+.about-team-row{display:flex;justify-content:space-between;font-size:11px;padding:8px 0;border-bottom:var(--hairline)}
+
+/* Settings */
+.settings-list{padding:0 16px}
+.setting-item{display:flex;align-items:center;justify-content:space-between;min-height:52px;padding:0 14px;background:#fff;border-bottom:var(--hairline);font-size:12px}
+.setting-item:first-child{border-radius:14px 14px 0 0}
+.setting-item:last-child{border-radius:0 0 14px 14px;border-bottom:0}
+.setting-item i{color:var(--muted);font-size:16px}
+
+/* Empty state */
+.empty-state{text-align:center;padding:60px 20px;color:var(--muted)}
+.empty-state i{font-size:48px;margin-bottom:12px;display:block}
+.empty-state p{font-size:12px}
+
+/* Product detail */
+.product-hero{background:var(--ink);color:#fff;padding:20px 16px;border-radius:0 0 24px 24px}
+.product-hero .ph-code{font-size:18px;font-weight:700}
+.product-hero .ph-type{font-size:10px;color:#c7c9d0;margin-top:2px}
+.product-hero .ph-timer{margin-top:10px;font-size:11px;color:var(--danger);background:rgba(255,255,255,.1);padding:6px 12px;border-radius:8px;display:inline-flex;align-items:center;gap:4px}
+.product-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px}
+.product-stat{background:#fff;border-radius:var(--radius-md);padding:12px;border:var(--hairline);text-align:center}
+.product-stat .ps-label{font-size:9px;color:var(--muted)}
+.product-stat .ps-value{font-size:14px;font-weight:700;margin-top:2px}
+.product-desc{padding:0 16px 16px;font-size:11px;line-height:1.7;color:var(--ink-soft)}
+.product-desc h3{font-size:14px;margin:14px 0 8px}
+
+/* Register page */
+.register-sheet{margin-top:auto;background:#fff;border-radius:34px 34px 0 0;padding:28px 20px 30px;box-shadow:0 -8px 28px rgba(17,18,22,.04)}
+
+/* Section title in pages */
+.page-section-title{font-size:13px;font-weight:600;padding:14px 16px 8px;color:var(--ink)}
+
+/* Misc */
+.text-success{color:var(--success)}
+.text-danger{color:var(--danger)}
+.text-muted{color:var(--muted)}
+.text-accent{color:var(--accent)}
+.fw-600{font-weight:600}
+.fs-10{font-size:10px}
+.mt-12{margin-top:12px}
+.mb-12{margin-bottom:12px}
+.px-16{padding-left:16px;padding-right:16px}
+
+/* Reward item */
+.reward-card{background:#fff;border-radius:var(--radius-md);padding:14px;border:var(--hairline);margin-bottom:10px}
+.reward-card .r-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.reward-card .r-product{font-size:12px;font-weight:500}
+.reward-card .r-value{font-size:14px;font-weight:700;color:var(--success)}
+.reward-card .r-meta{font-size:9px;color:var(--muted);display:flex;justify-content:space-between}
+
+@media(min-width:700px){
+  .bottom-nav{max-width:393px;left:50%;transform:translateX(-50%);border-radius:0 0 20px 20px}
+}
