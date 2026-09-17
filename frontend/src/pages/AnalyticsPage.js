@@ -22,8 +22,8 @@ const HOUR_OK = new Set(['24h', '7d']);
 
 const MONEY_KPIS = new Set(['ftd_value', 'deposits_value', 'net_deposits', 'avg_ftd']);
 const SERIES_METRICS = [
-  ['clicks', 'Cliques', '#b7ff59'], ['bot_starts', 'StartBots', '#63d3b1'], ['channel_joins', 'Entradas no canal', '#4aa3d8'],
-  ['registrations', 'Cadastros', '#8fe388'], ['ftds', 'FTDs', '#d8c46a'], ['deposits_value', 'Depósitos (R$)', '#3fbf8f'],
+  ['clicks', 'Cliques', '#F6F1E7'], ['bot_starts', 'StartBots', '#7FB3E8'], ['channel_joins', 'Entradas no canal', '#8E8FE0'],
+  ['registrations', 'Cadastros', '#86E0AE'], ['ftds', 'FTDs', '#E3BD78'], ['deposits_value', 'Depósitos (R$)', '#B9B2A5'],
 ];
 const SOURCE_LABELS = { meta: 'Meta Ads', tiktok: 'TikTok Ads', google: 'Google Ads', kwai: 'Kwai Ads', direct: 'Sem atribuição' };
 

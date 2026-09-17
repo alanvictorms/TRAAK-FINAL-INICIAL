@@ -11,8 +11,10 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Search, Megaphone, Plus, Trash2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { RefreshCw } from 'lucide-react';
 
 export default function CampaignsPage() {
+  const [syncing, setSyncing] = useState(false);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
@@ -45,11 +47,26 @@ export default function CampaignsPage() {
     try { await api.delete(`/media/${id}`); toast.success('Removida'); load(); } catch { toast.error('Erro'); }
   };
 
+  const syncMedia = async () => {
+    setSyncing(true);
+    try {
+      const { data } = await api.post('/media/sync');
+      const total = (data.synced || []).reduce((sum, item) => sum + item.campaigns, 0);
+      toast.success(`${total} campanhas sincronizadas do Meta Ads`);
+      (data.errors || []).forEach(e => toast.error(`${e.integration}: ${e.error}`));
+      load();
+    } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao sincronizar'); }
+    setSyncing(false);
+  };
+
   return (
     <div data-testid="campaigns-page">
       <div className="page-header">
         <div><h1>Campanhas<span className="accent">.</span></h1><p className="page-description">Campanhas, conjuntos, anúncios e métricas de mídia.</p></div>
-        <Button onClick={() => setShowCreate(true)} data-testid="create-campaign-btn"><Plus size={14} className="mr-2" /> Nova campanha</Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={syncMedia} disabled={syncing} data-testid="sync-media-btn"><RefreshCw size={14} className="mr-2" /> {syncing ? 'Sincronizando…' : 'Sincronizar Meta Ads'}</Button>
+          <Button onClick={() => setShowCreate(true)} data-testid="create-campaign-btn"><Plus size={14} className="mr-2" /> Nova campanha</Button>
+        </div>
       </div>
       <div className="data-toolbar">
         <div className="search-input" style={{ position: 'relative' }}>

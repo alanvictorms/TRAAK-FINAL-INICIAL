@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { num } from '@/lib/utils';
 
 /** Funil em blocos, com topo arredondado para dar volume. Tooltip mostra os números. */
-const COLORS = ['#b7ff59', '#8fe388', '#63d3b1', '#3fbf8f', '#2f9c86', '#1e7a63', '#175f52'];
+const COLORS = ['#F6F1E7', '#DED7CB', '#BFC7D6', '#9FB0CC', '#8290B4', '#6B7699', '#575F7D'];
 const WIDTH = 420;
 const BAND = 62;
 const CAP = 13;
@@ -36,9 +36,9 @@ export default function FunnelView({ steps, compare }) {
               <path d={`M${x1} ${y} L${x1 + wTop} ${y} L${x2 + wBottom} ${y + BAND} L${x2} ${y + BAND} Z`}
                 fill={color} opacity={active ? 0.95 : 0.62} />
               <ellipse cx={WIDTH / 2} cy={y + BAND} rx={wBottom / 2} ry={CAP} fill={color} opacity={active ? 0.6 : 0.45} />
-              <text x={WIDTH / 2} y={y + BAND / 2 + 2} textAnchor="middle" fill="hsl(157 60% 10%)"
+              <text x={WIDTH / 2} y={y + BAND / 2 + 2} textAnchor="middle" fill="#131315"
                 fontSize="15" fontWeight="700">{num(step.count)}</text>
-              <text x={WIDTH / 2} y={y + BAND / 2 + 17} textAnchor="middle" fill="hsl(157 45% 16%)" fontSize="9">{step.label}</text>
+              <text x={WIDTH / 2} y={y + BAND / 2 + 17} textAnchor="middle" fill="#3A3A40" fontSize="9">{step.label}</text>
             </g>
           );
         })}

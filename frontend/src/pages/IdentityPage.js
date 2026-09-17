@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import IdentityGraph from '@/components/identity/IdentityGraph';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Search, Fingerprint, Eye, EyeOff, Link2, Clock } from 'lucide-react';
 
@@ -92,10 +93,11 @@ export default function IdentityPage() {
       </Tabs>
 
       <Sheet open={!!showDetail} onOpenChange={o => !o && setShowDetail(null)}>
-        <SheetContent className="w-full sm:max-w-md overflow-y-auto" data-testid="identity-drawer">
+        <SheetContent className="w-full sm:max-w-3xl overflow-y-auto" data-testid="identity-drawer">
           <SheetHeader><SheetTitle className="text-base">{showDetail?.name || 'Identidade'}</SheetTitle></SheetHeader>
           {showDetail && (
             <div className="mt-4 space-y-4">
+              <IdentityGraph player={showDetail} />
               <div className="drawer-summary">
                 <div><span>Origem</span><strong>{showDetail.origin || '—'}</strong></div>
                 <div><span>Etapa</span><strong>{showDetail.pipeline_stage || 'sem etapa'}</strong></div>

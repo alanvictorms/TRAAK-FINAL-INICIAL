@@ -9,6 +9,7 @@ from analytics import CLOSE_REASONS
 from automation_engine import GraphError, simulate as simulate_graph, validate as validate_graph
 from segments import FIELDS as SEGMENT_FIELDS, SegmentError, segment_query
 from dispatch_runner import eligible_recipients, variants_of
+from media_sync import sync_workspace
 from realtime import inbox_events
 from models import (
     ConversationCreate, MessageCreate, SegmentCreate,
@@ -1141,6 +1142,34 @@ async def list_campaigns(request: Request, platform: str = None, status: str = N
     for item in items:
         item["_id"] = str(item["_id"])
     return {"items": items, "total": total, "page": page, "pages": math.ceil(total / limit) if total else 1}
+
+
+@router.post("/media/sync")
+async def sync_media(request: Request):
+    """Puxa campanhas e investimento das contas de mídia conectadas."""
+    user = await get_current_user(request)
+    result = await sync_workspace(user["workspace_id"])
+    if not result["synced"] and not result["errors"]:
+        raise HTTPException(400, "Nenhuma conta do Meta Ads conectada em Integrações")
+    if result["errors"] and not result["synced"]:
+        raise HTTPException(502, result["errors"][0]["error"])
+    await audit(user, "media.sync", None, "campaign")
+    return result
+
+
+@router.get("/media/daily")
+async def media_daily(request: Request, days: int = 30):
+    """Investimento por dia, que é o que faltava para o CPFTD e o ROI diários."""
+    user = await get_current_user(request)
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 180)))).strftime("%Y-%m-%d")
+    rows = await db.campaign_daily.aggregate([
+        {"$match": {"workspace_id": user["workspace_id"], "date": {"$gte": since}}},
+        {"$group": {"_id": "$date", "spend": {"$sum": "$spend"}, "clicks": {"$sum": "$clicks"},
+                    "impressions": {"$sum": "$impressions"}}},
+        {"$sort": {"_id": 1}},
+    ]).to_list(200)
+    return {"items": [{"date": r["_id"], "spend": round(r["spend"], 2), "clicks": r["clicks"],
+                       "impressions": r["impressions"]} for r in rows]}
 
 
 @router.post("/media")

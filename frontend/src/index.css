@@ -6,31 +6,31 @@
 @layer base {
   :root, .dark {
     color-scheme: dark;
-    --background: 174 76% 4.9%;
-    --foreground: 94 25.9% 94.7%;
-    --card: 172 59% 7.6%;
-    --card-foreground: 94 25.9% 94.7%;
-    --popover: 166 44.8% 11.4%;
-    --popover-foreground: 94 25.9% 94.7%;
-    --primary: 86 100% 67.5%;
-    --primary-foreground: 92 70.8% 9.4%;
-    --secondary: 160 37.5% 15.7%;
-    --secondary-foreground: 131 23.9% 86.1%;
-    --muted: 165 40% 11.8%;
-    --muted-foreground: 157 11.9% 62.2%;
-    --accent: 148 28.8% 20.4%;
-    --accent-foreground: 94 25.9% 94.7%;
-    --destructive: 348 76.7% 71.4%;
+    --background: 240 5% 4.1%;
+    --foreground: 40 33% 93%;
+    --card: 240 4% 8.4%;
+    --card-foreground: 40 33% 93%;
+    --popover: 240 4% 7%;
+    --popover-foreground: 40 33% 93%;
+    --primary: 40 45% 95%;
+    --primary-foreground: 240 5% 10%;
+    --secondary: 240 4% 12%;
+    --secondary-foreground: 40 33% 93%;
+    --muted: 240 4% 11%;
+    --muted-foreground: 40 8% 62%;
+    --accent: 240 4% 14%;
+    --accent-foreground: 40 33% 93%;
+    --destructive: 356 70% 66%;
     --destructive-foreground: 94 25.9% 94.7%;
-    --border: 159 28.9% 17.6%;
-    --input: 159 26.6% 21.4%;
-    --ring: 86 100% 67.5%;
+    --border: 240 4% 15%;
+    --input: 240 4% 18%;
+    --ring: 40 45% 95%;
     --radius: 0.75rem;
-    --chart-1: 86 100% 67.5%;
-    --chart-2: 95 31% 50%;
-    --chart-3: 150 22.9% 37.6%;
-    --chart-4: 85 35.6% 71.4%;
-    --chart-5: 156 15.3% 48.6%;
+    --chart-1: 40 45% 92%;
+    --chart-2: 150 45% 62%;
+    --chart-3: 205 60% 62%;
+    --chart-4: 40 20% 70%;
+    --chart-5: 240 5% 45%;
   }
 
   * {
@@ -46,8 +46,8 @@
   }
 
   ::selection {
-    background: hsl(86 100% 67.5% / 0.25);
-    color: #e9ffd3;
+    background: hsl(40 45% 95% / 0.22);
+    color: #F9F6EF;
   }
 
   :focus-visible {

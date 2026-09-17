@@ -23,17 +23,17 @@ import {
 import { toast } from 'sonner';
 
 const NODE_TYPES = [
-  { type: 'message', label: 'Mensagem', desc: 'Enviar uma mensagem', icon: MessageSquare, color: '#8fe388' },
-  { type: 'condition', label: 'Condição', desc: 'Ramificar Sim/Não', icon: GitBranch, color: '#d8c46a' },
-  { type: 'wait', label: 'Espera', desc: 'Aguardar um tempo', icon: Clock3, color: '#6fbfa8' },
-  { type: 'crm_action', label: 'Ações CRM', desc: 'Mover/criar lead', icon: ListTree, color: '#46c39a' },
-  { type: 'tags', label: 'Gerenciar Tags', desc: 'Aplicar/remover tags', icon: Tags, color: '#9fd97a' },
-  { type: 'menu', label: 'Menu', desc: 'Menu de N opções', icon: ListTree, color: '#5fb6a6' },
-  { type: 'random', label: 'Randomizador', desc: 'Caminho aleatório', icon: Shuffle, color: '#7aa88f' },
-  { type: 'action', label: 'Ação Automática', desc: 'Executar ação', icon: Zap, color: '#b7ff59' },
-  { type: 'ai', label: 'Inteligência IA', desc: 'Acionar/pausar IA', icon: Bot, color: '#63d3b1' },
-  { type: 'webhook', label: 'Webhook', desc: 'Chamada HTTP', icon: Webhook, color: '#6f9488' },
-  { type: 'handoff', label: 'Transferir', desc: 'Transferir atendimento', icon: UserRoundCheck, color: '#4fbf8b' },
+  { type: 'message', label: 'Mensagem', desc: 'Enviar uma mensagem', icon: MessageSquare, color: '#D8D2C6' },
+  { type: 'condition', label: 'Condição', desc: 'Ramificar Sim/Não', icon: GitBranch, color: '#E3BD78' },
+  { type: 'wait', label: 'Espera', desc: 'Aguardar um tempo', icon: Clock3, color: '#9FB0CC' },
+  { type: 'crm_action', label: 'Ações CRM', desc: 'Mover/criar lead', icon: ListTree, color: '#86E0AE' },
+  { type: 'tags', label: 'Gerenciar Tags', desc: 'Aplicar/remover tags', icon: Tags, color: '#C6C0B4' },
+  { type: 'menu', label: 'Menu', desc: 'Menu de N opções', icon: ListTree, color: '#7FB3E8' },
+  { type: 'random', label: 'Randomizador', desc: 'Caminho aleatório', icon: Shuffle, color: '#8A857C' },
+  { type: 'action', label: 'Ação Automática', desc: 'Executar ação', icon: Zap, color: '#F6F1E7' },
+  { type: 'ai', label: 'Inteligência IA', desc: 'Acionar/pausar IA', icon: Bot, color: '#8E8FE0' },
+  { type: 'webhook', label: 'Webhook', desc: 'Chamada HTTP', icon: Webhook, color: '#6B6B73' },
+  { type: 'handoff', label: 'Transferir', desc: 'Transferir atendimento', icon: UserRoundCheck, color: '#86E0AE' },
 ];
 
 const iconFor = kind => NODE_TYPES.find(item => item.type === kind)?.icon || Workflow;
@@ -53,7 +53,7 @@ function outputsFor(data) {
 
 function AutomationNode({ data, selected }) {
   const Icon = data.kind === 'trigger' ? Radio : iconFor(data.kind);
-  const color = data.kind === 'trigger' ? '#b7ff59' : (NODE_TYPES.find(item => item.type === data.kind)?.color || '#6f9488');
+  const color = data.kind === 'trigger' ? '#F6F1E7' : (NODE_TYPES.find(item => item.type === data.kind)?.color || '#6B6B73');
   const outputs = outputsFor(data);
   return (
     <div className={`flow-node ${selected ? 'is-selected' : ''}`} style={{ '--node-color': color }}>

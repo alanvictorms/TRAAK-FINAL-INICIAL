@@ -468,6 +468,11 @@ async def monitor_loop(interval_seconds: int = 900) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.error("batimento de saúde: %s", exc)
         try:
+            from media_sync import sync_all
+            await sync_all(days=7)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("sync de mídia: %s", exc)
+        try:
             await recheck_domains()
         except Exception as exc:  # noqa: BLE001
             logger.error("verificação de domínios: %s", exc)
