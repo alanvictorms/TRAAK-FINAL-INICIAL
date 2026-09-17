@@ -147,7 +147,7 @@ async def delete_quick_reply(reply_id: str, request: Request):
 @router.get("/settings/inbox-audio")
 async def get_audio(request: Request):
     user = await get_current_user(request)
-    saved = (await db.users.find_one({"_id": user["_id"]}, {"inbox_audio": 1}) or {}).get("inbox_audio") or {}
+    saved = (await db.users.find_one({"_id": ObjectId(user["_id"])}, {"inbox_audio": 1}) or {}).get("inbox_audio") or {}
     return {**AUDIO_DEFAULTS, **saved, "sounds": AUDIO_SOUNDS}
 
 
@@ -164,7 +164,7 @@ async def set_audio(request: Request):
         }
     except (TypeError, ValueError):
         raise HTTPException(400, "Volume e intervalo precisam ser números")
-    await db.users.update_one({"_id": user["_id"]}, {"$set": {"inbox_audio": settings}})
+    await db.users.update_one({"_id": ObjectId(user["_id"])}, {"$set": {"inbox_audio": settings}})
     return {**settings, "sounds": AUDIO_SOUNDS}
 
 
