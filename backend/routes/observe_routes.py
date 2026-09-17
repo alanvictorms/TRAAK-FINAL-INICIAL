@@ -4,6 +4,8 @@ from bson import ObjectId
 from database import db
 from auth import get_current_user
 from models import EventCreate, PlayerCreate, PlayerUpdate
+from analytics import FUNNEL
+from attribution import normalize_source, source_variants
 import math
 import re
 
@@ -107,7 +109,7 @@ async def create_event(body: EventCreate, request: Request):
 
 # ── Players ──
 @router.get("/players")
-async def list_players(request: Request, search: str = None, origin: str = None, expert: str = None, ftd_only: bool = False, page: int = 1, limit: int = 50):
+async def list_players(request: Request, search: str = None, origin: str = None, source: str = None, expert: str = None, ftd_only: bool = False, page: int = 1, limit: int = 50):
     user = await get_current_user(request)
     query = {"workspace_id": user["workspace_id"]}
     if search:
@@ -117,6 +119,8 @@ async def list_players(request: Request, search: str = None, origin: str = None,
         ]
     if origin:
         query["origin"] = origin
+    if source:
+        query["source"] = {"$in": source_variants(normalize_source(source))}
     if expert:
         query["expert_id"] = expert
     if ftd_only:
@@ -131,10 +135,68 @@ async def list_players(request: Request, search: str = None, origin: str = None,
 @router.get("/players/{player_id}")
 async def get_player(player_id: str, request: Request):
     user = await get_current_user(request)
+    if not ObjectId.is_valid(player_id):
+        raise HTTPException(404, "Player não encontrado")
     doc = await db.players.find_one({"_id": ObjectId(player_id), "workspace_id": user["workspace_id"]})
     if not doc:
         raise HTTPException(404, "Player não encontrado")
     doc["_id"] = str(doc["_id"])
+    ws_id = user["workspace_id"]
+
+    # Funil: primeira ocorrência de cada degrau, na ordem em que o lead anda.
+    journey = []
+    for key, label in FUNNEL:
+        first = await db.events.find_one({"workspace_id": ws_id, "person_id": player_id, "type": key},
+                                         sort=[("created_at", 1)])
+        journey.append({"key": key, "label": label, "at": first["created_at"] if first else None,
+                        "source": (first or {}).get("source")})
+    doc["journey"] = journey
+
+    # Aquisição: o clique que trouxe o player e o link/campanha dele.
+    attribution = doc.get("attribution") or {}
+    acquisition = {"attribution": attribution or None, "click": None, "link": None, "campaign": None}
+    if attribution.get("click_id"):
+        click = await db.events.find_one({"workspace_id": ws_id, "type": "click", "external_id": attribution["click_id"]},
+                                         {"metadata": 1, "source": 1, "created_at": 1})
+        if click:
+            click["_id"] = str(click["_id"])
+            acquisition["click"] = click
+    if attribution.get("link_id") and ObjectId.is_valid(attribution["link_id"]):
+        link = await db.tracking_links.find_one({"_id": ObjectId(attribution["link_id"])},
+                                                {"name": 1, "slug": 1, "utm_source": 1, "utm_campaign": 1})
+        if link:
+            link["_id"] = str(link["_id"])
+            acquisition["link"] = link
+    if attribution.get("campaign_id") and ObjectId.is_valid(str(attribution["campaign_id"])):
+        camp = await db.campaigns.find_one({"_id": ObjectId(attribution["campaign_id"])}, {"name": 1, "platform": 1})
+        if camp:
+            camp["_id"] = str(camp["_id"])
+            acquisition["campaign"] = camp
+    doc["acquisition"] = acquisition
+
+    # Provider: o que a casa (TAP) reportou sobre esse player.
+    provider_events = await db.events.find(
+        {"workspace_id": ws_id, "person_id": player_id, "metadata.provider": "tap"},
+        {"type": 1, "value": 1, "currency": 1, "external_id": 1, "created_at": 1, "status": 1},
+    ).sort("created_at", -1).limit(50).to_list(50)
+    for e in provider_events:
+        e["_id"] = str(e["_id"])
+    doc["provider"] = {
+        "customer_id": (doc.get("external_ids") or {}).get("tap_customer_id"),
+        "registered_at": doc.get("registered_at"),
+        "events": provider_events,
+    }
+
+    # Canais pelos quais dá para escrever para ele.
+    channels = []
+    for provider, ext_id in (doc.get("external_ids") or {}).items():
+        if not provider.endswith("_user_id"):
+            continue
+        name = provider[: -len("_user_id")]
+        async for integ in db.integrations.find({"workspace_id": ws_id, "provider": name}, {"name": 1, "provider": 1, "status": 1}):
+            channels.append({"integration_id": str(integ["_id"]), "name": integ.get("name"),
+                             "provider": name, "status": integ.get("status")})
+    doc["channels"] = channels
     # Fetch related events
     events = await db.events.find({"person_id": player_id, "workspace_id": user["workspace_id"]}).sort("created_at", -1).limit(50).to_list(50)
     for e in events:

@@ -116,23 +116,28 @@ async def create_integration(body: IntegrationCreate, request: Request):
 @router.put("/integrations/{integration_id}")
 async def update_integration(integration_id: str, body: IntegrationUpdate, request: Request):
     user = await get_current_user(request)
+    if not ObjectId.is_valid(integration_id):
+        raise HTTPException(404, "Integração não encontrada")
+    current = await db.integrations.find_one({"_id": ObjectId(integration_id), "workspace_id": user["workspace_id"]})
+    if not current:
+        raise HTTPException(404, "Integração não encontrada")
     update = {"updated_at": datetime.now(timezone.utc)}
     if body.name is not None:
         update["name"] = body.name
     if body.status is not None:
         update["status"] = body.status
+    # Mescla em vez de substituir: a tela manda só o que o usuário editou, e
+    # substituir apagava o webhook_secret do Telegram e o token de postback do
+    # TAP — os webhooks passariam a recusar tudo. Campo vazio não apaga segredo.
     if body.credentials is not None:
-        update["credentials"] = body.credentials
-        if body.credentials:
+        merged = dict(current.get("credentials") or {})
+        merged.update({k: v for k, v in body.credentials.items() if v not in (None, "", "••••••")})
+        update["credentials"] = merged
+        if merged:
             update["status"] = "configured"
     if body.config is not None:
-        update["config"] = body.config
-    result = await db.integrations.update_one(
-        {"_id": ObjectId(integration_id), "workspace_id": user["workspace_id"]},
-        {"$set": update},
-    )
-    if result.matched_count == 0:
-        raise HTTPException(404, "Integração não encontrada")
+        update["config"] = {**(current.get("config") or {}), **body.config}
+    await db.integrations.update_one({"_id": current["_id"]}, {"$set": update})
     await _audit(user, "integration.update", integration_id, "integration")
     return {"detail": "Atualizado"}
 

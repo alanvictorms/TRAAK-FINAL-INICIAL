@@ -6,6 +6,7 @@ from database import db, audit
 from auth import get_current_user
 from messaging import send_channel_message, notify
 from analytics import CLOSE_REASONS
+from automation_engine import GraphError, simulate as simulate_graph, validate as validate_graph
 from realtime import inbox_events
 from models import (
     ConversationCreate, MessageCreate, SegmentCreate,
@@ -261,6 +262,12 @@ async def send_message(conversation_id: str, body: MessageCreate, request: Reque
     conv = await db.conversations.find_one({"_id": ObjectId(conversation_id), "workspace_id": user["workspace_id"]})
     if not conv:
         raise HTTPException(404, "Conversa não encontrada")
+    return await deliver_message(user, conv, body)
+
+
+async def deliver_message(user, conv, body: MessageCreate):
+    """Envia pelo canal da conversa (resposta) ou só grava (nota interna)."""
+    conversation_id = str(conv["_id"])
     now = datetime.now(timezone.utc)
     delivery = {"status": "internal"}
     if body.type == "reply":
@@ -411,6 +418,67 @@ async def set_conversation_tags(conversation_id: str, request: Request):
     return {"tags": clean}
 
 
+@router.post("/players/{player_id}/message")
+async def message_player(player_id: str, request: Request):
+    """Mensagem direta da ficha do player, pelo canal escolhido.
+
+    Usa a conversa aberta do player naquele canal; se não houver e o canal
+    for Telegram, abre uma no chat privado do player (o bot só consegue
+    escrever para quem já iniciou conversa com ele).
+    """
+    user = await get_current_user(request)
+    ws_id = user["workspace_id"]
+    body = await _body(request)
+    content = (body.get("content") or "").strip()
+    integration_id = body.get("integration_id")
+    if not content:
+        raise HTTPException(400, "Escreva a mensagem")
+    if not ObjectId.is_valid(player_id):
+        raise HTTPException(404, "Player não encontrado")
+    player = await db.players.find_one({"_id": ObjectId(player_id), "workspace_id": ws_id})
+    if not player:
+        raise HTTPException(404, "Player não encontrado")
+    if not integration_id or not ObjectId.is_valid(integration_id):
+        raise HTTPException(400, "Escolha o canal")
+    integration = await db.integrations.find_one({"_id": ObjectId(integration_id), "workspace_id": ws_id})
+    if not integration:
+        raise HTTPException(400, "Canal não encontrado neste workspace")
+
+    conv = await db.conversations.find_one(
+        {"workspace_id": ws_id, "player_id": player_id, "integration_id": integration_id},
+        sort=[("updated_at", -1)],
+    )
+    created = False
+    if not conv:
+        created = True
+        provider = integration.get("provider")
+        chat_id = (player.get("external_ids") or {}).get(f"{provider}_user_id")
+        if not chat_id:
+            raise HTTPException(400, f"Player sem identificador em {provider}: ele precisa ter falado com esse canal antes")
+        now = datetime.now(timezone.utc)
+        conv = {
+            "workspace_id": ws_id, "player_id": player_id, "player_name": player.get("name"),
+            "channel": provider, "integration_id": integration_id,
+            "integration_name": integration.get("name"), "external_chat_id": chat_id,
+            "subject": "Mensagem enviada pela ficha do player", "status": "active",
+            "assigned_to": user["_id"], "assigned_name": user.get("name", ""),
+            "tags": [], "unread_count": 0, "created_at": now, "updated_at": now,
+        }
+        conv["_id"] = (await db.conversations.insert_one(conv)).inserted_id
+    elif conv.get("status") == "resolved":
+        # Reabrir é o esperado: a mensagem nova é continuação da conversa.
+        await db.conversations.update_one({"_id": conv["_id"]}, {"$set": {"status": "active"}})
+    try:
+        msg = await deliver_message(user, conv, MessageCreate(content=content, type="reply"))
+    except HTTPException:
+        # Envio falhou: conversa aberta agora não fica vazia no Inbox.
+        if created:
+            await db.conversations.delete_one({"_id": conv["_id"]})
+        raise
+    await audit(user, "player.message", player_id, "player")
+    return {"conversation_id": str(conv["_id"]), "message": msg}
+
+
 # ── Automations ──
 @router.get("/automations")
 async def list_automations(request: Request, status: str = None, page: int = 1, limit: int = 50):
@@ -497,6 +565,9 @@ async def update_automation(automation_id: str, body: AutomationUpdate, request:
         effective_connection = update.get("connection_id") or (current or {}).get("connection_id")
         if not effective_connection:
             raise HTTPException(400, "Selecione a conexão que executará a automação antes de publicar")
+        if current and not current.get("published"):
+            await _publish(user, {**current, **update})
+            update.pop("status")
     result = await db.automations.update_one(
         {"_id": ObjectId(automation_id), "workspace_id": user["workspace_id"]},
         {"$set": update},
@@ -504,6 +575,110 @@ async def update_automation(automation_id: str, body: AutomationUpdate, request:
     if result.matched_count == 0:
         raise HTTPException(404, "Automação não encontrada")
     return {"detail": "Atualizado"}
+
+
+async def _automation_or_404(automation_id, ws_id):
+    if not ObjectId.is_valid(automation_id):
+        raise HTTPException(404, "Automação não encontrada")
+    doc = await db.automations.find_one({"_id": ObjectId(automation_id), "workspace_id": ws_id})
+    if not doc:
+        raise HTTPException(404, "Automação não encontrada")
+    return doc
+
+
+async def _publish(user, automation, changelog=""):
+    graph = {"nodes": automation.get("nodes") or [], "edges": automation.get("edges") or []}
+    problems = validate_graph(graph)
+    if problems:
+        raise HTTPException(400, "Não dá para publicar: " + "; ".join(problems))
+    if not automation.get("connection_id"):
+        raise HTTPException(400, "Selecione a conexão que executará a automação antes de publicar")
+    now = datetime.now(timezone.utc)
+    version = int((automation.get("published") or {}).get("version") or 0) + 1
+    snapshot = {"version": version, "nodes": graph["nodes"], "edges": graph["edges"],
+                "published_at": now, "published_by": user["_id"], "published_by_name": user.get("name", "")}
+    # Versão publicada é imutável: só se cria outra.
+    await db.automation_versions.insert_one({
+        "automation_id": str(automation["_id"]), "workspace_id": user["workspace_id"],
+        "changelog": (changelog or "").strip() or None, **snapshot,
+    })
+    await db.automations.update_one({"_id": automation["_id"]}, {"$set": {
+        "published": snapshot, "status": "active", "version": version, "updated_at": now}})
+    await audit(user, "automation.publish", str(automation["_id"]), "automation")
+    return version
+
+
+@router.post("/automations/{automation_id}/publish")
+async def publish_automation(automation_id: str, request: Request):
+    user = await get_current_user(request)
+    automation = await _automation_or_404(automation_id, user["workspace_id"])
+    body = await _body(request)
+    version = await _publish(user, automation, body.get("changelog"))
+    return {"detail": f"Versão {version} publicada", "version": version}
+
+
+@router.get("/automations/{automation_id}/versions")
+async def list_automation_versions(automation_id: str, request: Request):
+    user = await get_current_user(request)
+    await _automation_or_404(automation_id, user["workspace_id"])
+    items = await db.automation_versions.find(
+        {"automation_id": automation_id, "workspace_id": user["workspace_id"]},
+        {"nodes": 0, "edges": 0},
+    ).sort("version", -1).to_list(100)
+    for item in items:
+        item["_id"] = str(item["_id"])
+    return {"items": items}
+
+
+@router.post("/automations/{automation_id}/versions/{version}/restore")
+async def restore_automation_version(automation_id: str, version: int, request: Request):
+    """Traz uma versão antiga para o rascunho. Não publica: publicar cria outra versão."""
+    user = await get_current_user(request)
+    automation = await _automation_or_404(automation_id, user["workspace_id"])
+    snap = await db.automation_versions.find_one({"automation_id": automation_id, "version": version,
+                                                  "workspace_id": user["workspace_id"]})
+    if not snap:
+        raise HTTPException(404, "Versão não encontrada")
+    await db.automations.update_one({"_id": automation["_id"]}, {"$set": {
+        "nodes": snap["nodes"], "edges": snap["edges"], "updated_at": datetime.now(timezone.utc)}})
+    await audit(user, "automation.restore", automation_id, "automation")
+    return {"detail": f"Versão {version} carregada no rascunho", "nodes": snap["nodes"], "edges": snap["edges"]}
+
+
+@router.post("/automations/{automation_id}/test")
+async def test_automation(automation_id: str, request: Request):
+    """Simula o rascunho sem enviar nada, sem mexer em lead nenhum."""
+    user = await get_current_user(request)
+    automation = await _automation_or_404(automation_id, user["workspace_id"])
+    body = await _body(request)
+    graph = {"nodes": body.get("nodes", automation.get("nodes") or []),
+             "edges": body.get("edges", automation.get("edges") or [])}
+    ctx = {
+        "message": str(body.get("message") or ""),
+        "player_name": str(body.get("player_name") or "Lead de teste"),
+        "tags": [str(t).lower() for t in body.get("tags") or []],
+        "has_ftd": bool(body.get("has_ftd")),
+        "source": body.get("source") or None,
+        "stage": body.get("stage") or None,
+    }
+    try:
+        transcript = simulate_graph(graph, ctx, [str(r) for r in body.get("replies") or []])
+    except GraphError as exc:
+        raise HTTPException(400, str(exc))
+    return {"problems": validate_graph(graph), "transcript": transcript}
+
+
+@router.get("/automations/{automation_id}/runs/{run_id}")
+async def get_automation_run(automation_id: str, run_id: str, request: Request):
+    user = await get_current_user(request)
+    if not ObjectId.is_valid(run_id):
+        raise HTTPException(404, "Execução não encontrada")
+    run = await db.automation_runs.find_one({"_id": ObjectId(run_id), "automation_id": automation_id,
+                                             "workspace_id": user["workspace_id"]}, {"nodes": 0, "edges": 0})
+    if not run:
+        raise HTTPException(404, "Execução não encontrada")
+    run["_id"] = str(run["_id"])
+    return run
 
 
 @router.delete("/automations/{automation_id}")
@@ -526,7 +701,7 @@ async def list_automation_executions(automation_id: str, request: Request, limit
         raise HTTPException(404, "Automação não encontrada")
     items = await db.automation_runs.find({
         "automation_id": automation_id, "workspace_id": user["workspace_id"],
-    }).sort("created_at", -1).limit(min(limit, 200)).to_list(min(limit, 200))
+    }, {"nodes": 0, "edges": 0}).sort("created_at", -1).limit(min(limit, 200)).to_list(min(limit, 200))
     player_ids = [ObjectId(item["player_id"]) for item in items if ObjectId.is_valid(item.get("player_id", ""))]
     players = await db.players.find({"_id": {"$in": player_ids}}).to_list(len(player_ids)) if player_ids else []
     names = {str(player["_id"]): player.get("name", "Lead") for player in players}

@@ -4,7 +4,8 @@ import {
   addEdge, useNodesState, useEdgesState, useReactFlow, BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import api from '@/lib/api';
+import { useNavigate, useParams } from 'react-router-dom';
+import api, { formatApiError } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,7 +17,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import {
   Workflow, Plus, Trash2, Play, Pause, Edit, ArrowLeft, Save, Rocket,
   MessageSquare, GitBranch, Clock3, Tags, ListTree, Shuffle, Zap, Bot,
-  Webhook, UserRoundCheck, Radio, BarChart3, ListChecks, RefreshCw,
+  Webhook, UserRoundCheck, Radio, BarChart3, ListChecks, RefreshCw, History, FlaskConical,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -36,15 +37,40 @@ const NODE_TYPES = [
 
 const iconFor = kind => NODE_TYPES.find(item => item.type === kind)?.icon || Workflow;
 
+// Saídas nomeadas: o motor segue a aresta pelo sourceHandle.
+function outputsFor(data) {
+  const cfg = data.config || {};
+  if (data.kind === 'condition') return [['yes', 'Sim'], ['no', 'Não']];
+  if (data.kind === 'menu') {
+    const options = (cfg.options || []).filter(o => String(o).trim());
+    return [...options.map((o, i) => [`opt-${i}`, `${i + 1}`]), ['other', 'Outro']];
+  }
+  if (data.kind === 'random') return Array.from({ length: Math.max(2, Number(cfg.branches) || 2) }, (_, i) => [`r-${i}`, String.fromCharCode(65 + i)]);
+  if (data.kind === 'handoff') return [];
+  return null;
+}
+
 function AutomationNode({ data, selected }) {
   const Icon = data.kind === 'trigger' ? Radio : iconFor(data.kind);
   const color = data.kind === 'trigger' ? '#19d3ae' : (NODE_TYPES.find(item => item.type === data.kind)?.color || '#7890aa');
+  const outputs = outputsFor(data);
   return (
     <div className={`flow-node ${selected ? 'is-selected' : ''}`} style={{ '--node-color': color }}>
       {data.kind !== 'trigger' && <Handle type="target" position={Position.Top} />}
       <div className="flow-node-title"><span className="flow-node-icon"><Icon size={13} /></span>{data.label}</div>
       <div className="flow-node-description">{data.description || 'Configure esta etapa'}</div>
-      <Handle type="source" position={Position.Bottom} />
+      {outputs === null && <Handle type="source" position={Position.Bottom} />}
+      {outputs && outputs.length > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: 6, fontSize: 9, opacity: 0.8 }}>
+          {outputs.map(([id, label], i) => (
+            <span key={id} style={{ position: 'relative' }}>
+              {label}
+              <Handle type="source" id={id} position={Position.Bottom}
+                style={{ left: '50%', bottom: -10, background: id === 'no' || id === 'other' ? '#f87171' : undefined }} />
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -72,6 +98,8 @@ function FlowEditor({ automation, connections, onClose, onSaved }) {
   const [executions, setExecutions] = useState(null);
   const [panelLoading, setPanelLoading] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
+  const [agents, setAgents] = useState([]);
+  useEffect(() => { api.get('/inbox/meta/options').then(r => setAgents(r.data.agents)).catch(() => {}); }, []);
   const selectedNode = nodes.find(node => node.id === selectedNodeId);
 
   const addNodeAt = useCallback((kind, position) => {
@@ -91,6 +119,11 @@ function FlowEditor({ automation, connections, onClose, onSaved }) {
   const updateSelected = (field, value) => setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, [field]: value } } : node));
   const updateConfig = (field, value) => setNodes(current => current.map(node => node.id === selectedNodeId ? { ...node, data: { ...node.data, config: { ...(node.data.config || {}), [field]: value } } } : node));
 
+  const [versions, setVersions] = useState(null);
+  const [testing, setTesting] = useState(null);
+  const [runDetail, setRunDetail] = useState(null);
+
+  // Salvar mexe só no rascunho. Quem está no fluxo segue na versão publicada.
   const save = async (publish = false) => {
     if (!connectionId) return toast.error('Selecione a conexão que executará esta automação');
     setSaving(true);
@@ -98,13 +131,53 @@ function FlowEditor({ automation, connections, onClose, onSaved }) {
       await api.put(`/automations/${automation._id}`, {
         nodes, edges, connection_id: connectionId,
         trigger: { type: 'message', event: 'message_received' },
-        ...(publish ? { status: 'active' } : {}),
       });
-      toast.success(publish ? 'Automação publicada' : 'Fluxo salvo');
-      onSaved();
-      if (publish) onClose();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao salvar o fluxo'); }
+      if (publish) {
+        const changelog = window.prompt('O que mudou nesta versão? (opcional)') ?? '';
+        const { data } = await api.post(`/automations/${automation._id}/publish`, { changelog });
+        toast.success(data.detail);
+        onSaved();
+        onClose();
+      } else {
+        toast.success('Rascunho salvo');
+        onSaved();
+      }
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
     finally { setSaving(false); }
+  };
+
+  const openVersions = async () => {
+    try { const { data } = await api.get(`/automations/${automation._id}/versions`); setVersions(data.items); }
+    catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+  };
+
+  const restore = async (version) => {
+    if (!window.confirm(`Carregar a versão ${version} no rascunho? O rascunho atual será substituído.`)) return;
+    try {
+      const { data } = await api.post(`/automations/${automation._id}/versions/${version}/restore`);
+      setNodes(normalizeNodes(data.nodes));
+      setEdges(data.edges || []);
+      setVersions(null);
+      toast.success(data.detail);
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+  };
+
+  const runTest = async () => {
+    try {
+      const { data } = await api.post(`/automations/${automation._id}/test`, {
+        nodes, edges,
+        message: testing.message, player_name: testing.player_name,
+        tags: testing.tags.split(',').map(t => t.trim()).filter(Boolean),
+        has_ftd: testing.has_ftd,
+        replies: testing.replies.split('\n').map(r => r.trim()).filter(Boolean),
+      });
+      setTesting(t => ({ ...t, result: data }));
+    } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
+  };
+
+  const openRun = async (id) => {
+    try { const { data } = await api.get(`/automations/${automation._id}/runs/${id}`); setRunDetail(data); }
+    catch (err) { toast.error(formatApiError(err.response?.data?.detail)); }
   };
 
   const openAnalytics = async () => {
@@ -125,11 +198,16 @@ function FlowEditor({ automation, connections, onClose, onSaved }) {
     <div className="automation-editor" data-testid="automation-editor">
       <header className="automation-editor-header">
         <Button variant="ghost" size="icon" onClick={onClose} aria-label="Voltar"><ArrowLeft size={17} /></Button>
-        <div className="automation-title"><strong>{automation.name}</strong><span>{nodes.length} blocos · {edges.length} conexões</span></div>
+        <div className="automation-title"><strong>{automation.name}</strong><span>{nodes.length} blocos · {edges.length} conexões · {automation.published ? `v${automation.published.version} publicada` : 'nunca publicada'}</span></div>
         <div className="automation-header-actions">
           <Button variant="ghost" size="sm" onClick={openAnalytics}><BarChart3 size={13} className="mr-2" />Analytics</Button>
           <Button variant="ghost" size="sm" onClick={openExecutions}><ListChecks size={13} className="mr-2" />Execuções</Button>
-          <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving}><Save size={13} className="mr-2" />Salvar</Button>
+          <Button variant="ghost" size="sm" onClick={openVersions} data-testid="automation-versions"><History size={13} className="mr-2" />Versões</Button>
+          <Button variant="ghost" size="sm" data-testid="automation-test"
+            onClick={() => setTesting({ message: 'oi', player_name: 'Lead de teste', tags: '', has_ftd: false, replies: '', result: null })}>
+            <FlaskConical size={13} className="mr-2" />Testar
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => save(false)} disabled={saving}><Save size={13} className="mr-2" />Salvar rascunho</Button>
           <Button size="sm" onClick={() => save(true)} disabled={saving}><Rocket size={13} className="mr-2" />Publicar</Button>
         </div>
       </header>
@@ -163,16 +241,145 @@ function FlowEditor({ automation, connections, onClose, onSaved }) {
               <div className="flow-field"><Label>Descrição</Label><Input value={selectedNode.data.description || ''} onChange={event => updateSelected('description', event.target.value)} /></div>
               {selectedNode.data.kind === 'message' && <div className="flow-field"><Label>Mensagem</Label><Textarea rows={5} placeholder="Olá! Como posso ajudar?" value={selectedNode.data.config?.text || ''} onChange={event => updateConfig('text', event.target.value)} /></div>}
               {selectedNode.data.kind === 'wait' && <div className="flow-field"><Label>Espera (minutos)</Label><Input type="number" min="1" value={selectedNode.data.config?.minutes || ''} onChange={event => updateConfig('minutes', event.target.value)} /></div>}
-              {selectedNode.data.kind === 'webhook' && <div className="flow-field"><Label>URL</Label><Input placeholder="https://..." value={selectedNode.data.config?.url || ''} onChange={event => updateConfig('url', event.target.value)} /></div>}
+              {selectedNode.data.kind === 'webhook' && <div className="flow-field"><Label>URL</Label><Input placeholder="https://..." value={selectedNode.data.config?.url || ''} onChange={event => updateConfig('url', event.target.value)} /><small>POST JSON com lead, conversa e última mensagem. Só endereços públicos.</small></div>}
+              <NodeConfig node={selectedNode} updateConfig={updateConfig} agents={agents} />
               <Button variant="outline" className="w-full text-destructive" onClick={() => { setNodes(current => current.filter(node => node.id !== selectedNodeId)); setEdges(current => current.filter(edge => edge.source !== selectedNodeId && edge.target !== selectedNodeId)); setSelectedNodeId(null); }}><Trash2 size={13} className="mr-2" />Excluir bloco</Button>
             </div>
           ) : <p className="flow-settings-empty">Selecione um bloco para editar suas propriedades.</p>}
         </aside>
       </div>
       <AutomationAnalyticsDialog open={!!analytics} data={analytics} nodes={nodes} name={automation.name} loading={panelLoading} onClose={() => setAnalytics(null)} onRefresh={openAnalytics} />
-      <AutomationExecutionsDialog open={!!executions} data={executions} loading={panelLoading} onClose={() => setExecutions(null)} onRefresh={openExecutions} />
+      <AutomationExecutionsDialog open={!!executions} data={executions} loading={panelLoading} onClose={() => setExecutions(null)} onRefresh={openExecutions} onOpenRun={openRun} />
+      <Dialog open={!!versions} onOpenChange={o => !o && setVersions(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Versões publicadas</DialogTitle></DialogHeader>
+          <DialogDescription className="text-xs">Cada publicação é imutável. Restaurar traz a versão para o rascunho; publique para ela voltar a valer.</DialogDescription>
+          {versions?.length ? (
+            <Table><TableHeader><TableRow><TableHead>Versão</TableHead><TableHead>Publicada</TableHead><TableHead>Por</TableHead><TableHead>O que mudou</TableHead><TableHead /></TableRow></TableHeader>
+              <TableBody>{versions.map(v => (
+                <TableRow key={v._id}>
+                  <TableCell className="text-xs font-medium">v{v.version}</TableCell>
+                  <TableCell className="text-[10px]">{new Date(v.published_at).toLocaleString('pt-BR')}</TableCell>
+                  <TableCell className="text-xs">{v.published_by_name || '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{v.changelog || '—'}</TableCell>
+                  <TableCell className="text-right"><Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => restore(v.version)}>Restaurar</Button></TableCell>
+                </TableRow>
+              ))}</TableBody></Table>
+          ) : <p className="text-xs text-muted-foreground">Nenhuma versão publicada ainda.</p>}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!testing} onOpenChange={o => !o && setTesting(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Testar fluxo</DialogTitle></DialogHeader>
+          <DialogDescription className="text-xs">Simula o rascunho atual. Nada é enviado e nenhum lead é alterado; esperas são puladas.</DialogDescription>
+          {testing && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <div><Label className="text-xs">Primeira mensagem do lead</Label><Input className="text-xs" value={testing.message} onChange={e => setTesting(t => ({ ...t, message: e.target.value }))} /></div>
+                <div><Label className="text-xs">Nome</Label><Input className="text-xs" value={testing.player_name} onChange={e => setTesting(t => ({ ...t, player_name: e.target.value }))} /></div>
+                <div><Label className="text-xs">Etiquetas (vírgula)</Label><Input className="text-xs" value={testing.tags} onChange={e => setTesting(t => ({ ...t, tags: e.target.value }))} /></div>
+                <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={testing.has_ftd} onChange={e => setTesting(t => ({ ...t, has_ftd: e.target.checked }))} /> Já fez FTD</label>
+                <div><Label className="text-xs">Respostas aos menus (uma por linha)</Label><Textarea rows={3} className="text-xs" value={testing.replies} onChange={e => setTesting(t => ({ ...t, replies: e.target.value }))} /></div>
+                <Button size="sm" onClick={runTest} data-testid="run-test"><FlaskConical size={13} className="mr-2" />Simular</Button>
+              </div>
+              <div className="rounded-md border border-border p-2 max-h-80 overflow-auto space-y-1.5" data-testid="test-transcript">
+                {!testing.result ? <p className="text-xs text-muted-foreground">O resultado aparece aqui.</p> : (
+                  <>
+                    {testing.result.problems.length > 0 && <p className="text-[10px] text-amber-300">Não publicável: {testing.result.problems.join('; ')}</p>}
+                    {testing.result.transcript.map((step, i) => <TestStep key={i} step={step} />)}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={!!runDetail} onOpenChange={o => !o && setRunDetail(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader><DialogTitle>Execução · {runDetail?.status}</DialogTitle></DialogHeader>
+          <DialogDescription className="text-xs">{runDetail?.version ? `Versão ${runDetail.version}` : 'Versão anterior ao versionamento'}{runDetail?.error ? ` · erro: ${runDetail.error}` : ''}</DialogDescription>
+          <div className="max-h-80 overflow-auto space-y-1">
+            {(runDetail?.log || []).length === 0 ? <p className="text-xs text-muted-foreground">Sem passos registrados ainda.</p> : runDetail.log.map((l, i) => (
+              <div key={i} className="text-[11px] flex gap-2">
+                <span className="text-muted-foreground shrink-0">{new Date(l.at).toLocaleTimeString('pt-BR')}</span>
+                <Badge variant="outline" className="text-[9px]">{l.type}</Badge>
+                <span className="truncate">{l.node}</span>
+                {l.detail && <span className="text-muted-foreground truncate">{l.detail}</span>}
+                {l.error && <span className="text-destructive">{l.error}</span>}
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+const STEP_TEXT = {
+  send: s => `Enviaria: “${s.text}”`,
+  wait: s => `Esperaria ${s.minutes} min`,
+  reply: s => `Lead respondeu: “${s.text}”`,
+  tags: s => `Etiquetas: +${(s.add || []).join(', ') || '—'} / -${(s.remove || []).join(', ') || '—'}`,
+  stage: s => `Moveria para a etapa “${s.stage}”`,
+  ai_reply: s => `Responderia com IA (instrução: “${s.prompt.slice(0, 60)}”)`,
+  webhook: s => `Chamaria ${s.url}`,
+  handoff: s => (s.agent_id ? 'Transferiria para um atendente' : 'Devolveria para a fila humana'),
+  close_conversation: () => 'Encerraria a conversa',
+  reopen_conversation: () => 'Reabriria a conversa',
+  log: s => s.text,
+  end: s => (s.status === 'completed' ? 'Fim do fluxo' : s.status === 'waiting_reply' ? 'Parou esperando resposta do lead' : `Falhou: ${s.error}`),
+};
+
+function TestStep({ step }) {
+  const text = (STEP_TEXT[step.type] || (() => step.type))(step);
+  const tone = step.type === 'end' && step.status === 'failed' ? 'text-destructive' : step.type === 'send' ? '' : 'text-muted-foreground';
+  return <p className={`text-[11px] ${tone} whitespace-pre-wrap`}>{text}</p>;
+}
+
+const CONDITION_FIELDS = [['message', 'Mensagem do lead'], ['tag', 'Etiqueta'], ['has_ftd', 'Fez FTD'], ['source', 'Fonte'], ['stage', 'Etapa']];
+const CONDITION_OPS = [['contains', 'contém'], ['equals', 'é igual a'], ['not_contains', 'não contém'], ['exists', 'existe'], ['not_exists', 'não existe']];
+const listValue = v => (Array.isArray(v) ? v.join(', ') : '');
+const toList = v => v.split(',').map(x => x.trim()).filter(Boolean);
+
+function NodeConfig({ node, updateConfig, agents }) {
+  const kind = node.data.kind;
+  const cfg = node.data.config || {};
+  if (kind === 'condition') {
+    return <>
+      <div className="flow-field"><Label>Campo</Label><Select value={cfg.field || 'message'} onValueChange={v => updateConfig('field', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CONDITION_FIELDS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
+      <div className="flow-field"><Label>Operador</Label><Select value={cfg.operator || 'contains'} onValueChange={v => updateConfig('operator', v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{CONDITION_OPS.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}</SelectContent></Select></div>
+      {!['exists', 'not_exists'].includes(cfg.operator) && cfg.field !== 'has_ftd' && <div className="flow-field"><Label>Valor</Label><Input value={cfg.value || ''} onChange={e => updateConfig('value', e.target.value)} /></div>}
+      <small className="text-[10px] text-muted-foreground">Ligue a saída “Sim” e a “Não”.</small>
+    </>;
+  }
+  if (kind === 'tags') {
+    return <>
+      <div className="flow-field"><Label>Adicionar (vírgula)</Label><Input value={listValue(cfg.add)} onChange={e => updateConfig('add', toList(e.target.value))} /></div>
+      <div className="flow-field"><Label>Remover (vírgula)</Label><Input value={listValue(cfg.remove)} onChange={e => updateConfig('remove', toList(e.target.value))} /></div>
+    </>;
+  }
+  if (kind === 'crm_action') {
+    return <div className="flow-field"><Label>Mover para a etapa</Label><Input placeholder="qualificado, negociação…" value={cfg.stage || ''} onChange={e => updateConfig('stage', e.target.value)} /></div>;
+  }
+  if (kind === 'menu') {
+    return <>
+      <div className="flow-field"><Label>Pergunta</Label><Textarea rows={2} value={cfg.text || ''} onChange={e => updateConfig('text', e.target.value)} /></div>
+      <div className="flow-field"><Label>Opções (uma por linha)</Label><Textarea rows={4} value={(cfg.options || []).join('\n')} onChange={e => updateConfig('options', e.target.value.split('\n'))} /><small>O lead responde com o número ou o texto. Resposta fora das opções segue por “Outro”.</small></div>
+    </>;
+  }
+  if (kind === 'random') {
+    return <div className="flow-field"><Label>Caminhos</Label><Input type="number" min="2" max="6" value={cfg.branches || 2} onChange={e => updateConfig('branches', e.target.value)} /><small>Cada caminho tem a mesma chance.</small></div>;
+  }
+  if (kind === 'action') {
+    return <div className="flow-field"><Label>Ação</Label><Select value={cfg.kind || ''} onValueChange={v => updateConfig('kind', v)}><SelectTrigger><SelectValue placeholder="Escolha" /></SelectTrigger><SelectContent><SelectItem value="close_conversation">Encerrar conversa</SelectItem><SelectItem value="reopen_conversation">Reabrir conversa</SelectItem></SelectContent></Select></div>;
+  }
+  if (kind === 'ai') {
+    return <div className="flow-field"><Label>Instrução para a IA</Label><Textarea rows={5} placeholder="Você é o atendente da operação. Responda de forma curta…" value={cfg.prompt || ''} onChange={e => updateConfig('prompt', e.target.value)} /><small>Responde à última mensagem do lead usando o provedor de Plataforma &gt; IA.</small></div>;
+  }
+  if (kind === 'handoff') {
+    return <div className="flow-field"><Label>Para</Label><Select value={cfg.agent_id || 'queue'} onValueChange={v => updateConfig('agent_id', v === 'queue' ? null : v)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="queue">Fila (qualquer atendente)</SelectItem>{agents.map(a => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent></Select><small>O fluxo termina aqui.</small></div>;
+  }
+  return null;
 }
 
 function PaletteItem({ item, onAdd }) {
@@ -195,16 +402,18 @@ function AutomationAnalyticsDialog({ open, data, nodes, name, loading, onClose, 
   </DialogContent></Dialog>;
 }
 
-function AutomationExecutionsDialog({ open, data, loading, onClose, onRefresh }) {
+function AutomationExecutionsDialog({ open, data, loading, onClose, onRefresh, onOpenRun }) {
   return <Dialog open={open} onOpenChange={value => !value && onClose()}><DialogContent className="automation-data-dialog max-w-4xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><ListChecks size={16} />Execuções do fluxo</DialogTitle></DialogHeader>
     <DialogDescription className="sr-only">Lista de leads que entraram neste fluxo e o estado atual de cada execução.</DialogDescription>
     <Button variant="ghost" size="icon" className="dialog-refresh" onClick={onRefresh} disabled={loading}><RefreshCw size={13} className={loading ? 'animate-spin' : ''} /></Button>
-    {data?.items?.length ? <div className="executions-table"><Table><TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Status</TableHead><TableHead>Etapa atual</TableHead><TableHead>Início</TableHead></TableRow></TableHeader><TableBody>{data.items.map(run => <TableRow key={run._id}><TableCell>{run.player_name}</TableCell><TableCell><Badge variant="outline">{run.status}</Badge></TableCell><TableCell>{run.current_node_id || 'Gatilho inicial'}</TableCell><TableCell>{new Date(run.created_at).toLocaleString('pt-BR')}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="automation-empty-runs"><ListChecks size={28} /><p>Nenhuma execução registrada ainda.</p><span>Ative o fluxo para começar.</span></div>}
+    {data?.items?.length ? <div className="executions-table"><Table><TableHeader><TableRow><TableHead>Lead</TableHead><TableHead>Status</TableHead><TableHead>Etapa atual</TableHead><TableHead>Início</TableHead></TableRow></TableHeader><TableBody>{data.items.map(run => <TableRow key={run._id} className="cursor-pointer" onClick={() => onOpenRun(run._id)}><TableCell>{run.player_name}</TableCell><TableCell><Badge variant="outline">{run.status}</Badge></TableCell><TableCell>{run.current_node_id || 'Gatilho inicial'}</TableCell><TableCell>{new Date(run.created_at).toLocaleString('pt-BR')}</TableCell></TableRow>)}</TableBody></Table></div> : <div className="automation-empty-runs"><ListChecks size={28} /><p>Nenhuma execução registrada ainda.</p><span>Ative o fluxo para começar.</span></div>}
     <div className="executions-footnote">Clique em uma linha para ver o log detalhado.</div>
   </DialogContent></Dialog>;
 }
 
 export default function AutomationsPage() {
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [connections, setConnections] = useState([]);
   const [total, setTotal] = useState(0);
@@ -230,19 +439,20 @@ export default function AutomationsPage() {
     if (!form.connection_id) return toast.error('Selecione uma conexão');
     try {
       const { data } = await api.post('/automations', { name: form.name, connection_id: form.connection_id, trigger: { type: 'message', event: 'message_received' }, nodes: normalizeNodes([]), edges: [], status: 'draft' });
-      setShowCreate(false); setForm({ name: '', connection_id: '' }); setShowEditor(data); load();
+      setShowCreate(false); setForm({ name: '', connection_id: '' }); navigate(`/automations/${data._id}`); load();
     } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao criar'); }
   };
-  const openEditor = async id => { try { const { data } = await api.get(`/automations/${id}`); setShowEditor(data); } catch { toast.error('Erro ao abrir automação'); } };
-  const toggleStatus = async item => { const status = item.status === 'active' ? 'paused' : 'active'; try { await api.put(`/automations/${item._id}`, { status }); toast.success(status === 'active' ? 'Automação ativada' : 'Automação pausada'); load(); } catch (err) { toast.error(err.response?.data?.detail || 'Erro ao alterar status'); } };
+  const openEditor = useCallback(async id => { try { const { data } = await api.get(`/automations/${id}`); setShowEditor(data); } catch { toast.error('Automação não encontrada'); navigate('/automations', { replace: true }); } }, [navigate]);
+  useEffect(() => { if (routeId) openEditor(routeId); else setShowEditor(null); }, [routeId, openEditor]);
+  const toggleStatus = async item => { const status = item.status === 'active' ? 'paused' : 'active'; try { await api.put(`/automations/${item._id}`, { status }); toast.success(status === 'active' ? 'Automação ativada' : 'Automação pausada'); load(); } catch (err) { toast.error(formatApiError(err.response?.data?.detail)); } };
   const remove = async id => { if (!window.confirm('Remover automação?')) return; try { await api.delete(`/automations/${id}`); toast.success('Automação removida'); load(); } catch { toast.error('Erro ao remover'); } };
 
-  if (showEditor) return <ReactFlowProvider><FlowEditor automation={showEditor} connections={connections} onClose={() => setShowEditor(null)} onSaved={load} /></ReactFlowProvider>;
+  if (showEditor) return <ReactFlowProvider><FlowEditor key={showEditor._id} automation={showEditor} connections={connections} onClose={() => navigate('/automations')} onSaved={load} /></ReactFlowProvider>;
 
   return <div data-testid="automations-page">
     <div className="page-header"><div><h1>Automações<span className="accent">.</span></h1><p className="page-description">Crie jornadas visuais acionadas pelas suas conexões de mensagem.</p></div><Button onClick={() => setShowCreate(true)} data-testid="create-automation-btn"><Plus size={14} className="mr-2" />Nova automação</Button></div>
     <div className="data-toolbar"><Select value={statusFilter} onValueChange={setStatusFilter}><SelectTrigger className="w-[140px] h-8 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todos</SelectItem><SelectItem value="draft">Rascunho</SelectItem><SelectItem value="active">Ativo</SelectItem><SelectItem value="paused">Pausado</SelectItem></SelectContent></Select><Badge variant="outline" className="text-[9px] ml-auto">{total} automações</Badge></div>
-    <div className="stat-card" style={{ overflow: 'auto' }}><Table><TableHeader><TableRow><TableHead>Nome</TableHead><TableHead>Conexão</TableHead><TableHead>Status</TableHead><TableHead>Fluxo</TableHead><TableHead>Execuções</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>{items.length === 0 ? <TableRow><TableCell colSpan={6}><div className="empty-state"><Workflow size={32} /><h3>Nenhuma automação</h3><p>Crie um fluxo e conecte-o ao WhatsApp ou Telegram.</p></div></TableCell></TableRow> : items.map(item => <TableRow key={item._id}><TableCell className="text-xs font-medium">{item.name}</TableCell><TableCell className="text-xs">{connectionNames[item.connection_id] || 'Não selecionada'}</TableCell><TableCell><Badge className={`text-[9px] ${item.status === 'active' ? 'badge-success' : item.status === 'paused' ? 'badge-warning' : ''}`}>{item.status}</Badge></TableCell><TableCell className="text-xs">{(item.nodes || []).length} blocos · {(item.edges || []).length} conexões</TableCell><TableCell className="text-xs">{item.executions || 0}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditor(item._id)}><Edit size={13} /></Button><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleStatus(item)}>{item.status === 'active' ? <Pause size={13} /> : <Play size={13} />}</Button><Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item._id)}><Trash2 size={13} /></Button></div></TableCell></TableRow>)}</TableBody></Table></div>
+    <div className="stat-card" style={{ overflow: 'auto' }}><Table><TableHeader><TableRow><TableHead>Nome</TableHead><TableHead>Conexão</TableHead><TableHead>Status</TableHead><TableHead>Fluxo</TableHead><TableHead>Execuções</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>{items.length === 0 ? <TableRow><TableCell colSpan={6}><div className="empty-state"><Workflow size={32} /><h3>Nenhuma automação</h3><p>Crie um fluxo e conecte-o ao WhatsApp ou Telegram.</p></div></TableCell></TableRow> : items.map(item => <TableRow key={item._id}><TableCell className="text-xs font-medium">{item.name}</TableCell><TableCell className="text-xs">{connectionNames[item.connection_id] || 'Não selecionada'}</TableCell><TableCell><Badge className={`text-[9px] ${item.status === 'active' ? 'badge-success' : item.status === 'paused' ? 'badge-warning' : ''}`}>{item.status}</Badge></TableCell><TableCell className="text-xs">{(item.nodes || []).length} blocos · {(item.edges || []).length} conexões</TableCell><TableCell className="text-xs">{item.executions || 0}</TableCell><TableCell className="text-right"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Editar" onClick={() => navigate(`/automations/${item._id}`)}><Edit size={13} /></Button><Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleStatus(item)}>{item.status === 'active' ? <Pause size={13} /> : <Play size={13} />}</Button><Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(item._id)}><Trash2 size={13} /></Button></div></TableCell></TableRow>)}</TableBody></Table></div>
     <Dialog open={showCreate} onOpenChange={setShowCreate}><DialogContent data-testid="create-automation-dialog"><DialogHeader><DialogTitle>Nova automação</DialogTitle></DialogHeader><form onSubmit={handleCreate} className="space-y-4"><div><Label>Nome</Label><Input className="mt-1" value={form.name} onChange={event => setForm(current => ({ ...current, name: event.target.value }))} placeholder="Ex.: Boas-vindas Telegram" required /></div><div><Label>Conexão</Label><Select value={form.connection_id} onValueChange={value => setForm(current => ({ ...current, connection_id: value }))}><SelectTrigger className="mt-1"><SelectValue placeholder="Selecione WhatsApp ou Telegram" /></SelectTrigger><SelectContent>{connections.map(connection => <SelectItem key={connection._id} value={connection._id}>{connection.name} · {connection.provider}</SelectItem>)}</SelectContent></Select><p className="text-[10px] text-muted-foreground mt-1">Mensagens recebidas nesta conexão iniciarão o fluxo.</p></div>{connections.length === 0 && <div className="text-xs text-amber-300 bg-amber-950/30 border border-amber-900 rounded-md p-3">Configure primeiro uma integração de WhatsApp ou Telegram.</div>}<DialogFooter><Button type="button" variant="outline" onClick={() => setShowCreate(false)}>Cancelar</Button><Button type="submit" disabled={!connections.length} data-testid="submit-automation">Criar e editar</Button></DialogFooter></form></DialogContent></Dialog>
   </div>;
 }

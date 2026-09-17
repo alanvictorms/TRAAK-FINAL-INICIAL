@@ -24,6 +24,7 @@ CLOSE_REASONS = {
     "spam": "Spam",
     "duplicate": "Duplicado",
     "other": "Outro",
+    "blocked": "Bloqueado",
 }
 
 

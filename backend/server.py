@@ -22,6 +22,7 @@ from routes.copilot_routes import router as copilot_router
 from routes.webhook_routes import router as webhook_router
 from telegram_service import sync_telegram_webhooks
 from messaging import monitor_loop
+from automation_runner import worker_loop
 import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -148,11 +149,15 @@ async def startup():
     # rodaria o laço; o dedupe_key evita alerta duplicado, mas vira lock
     # distribuído se o custo das consultas pesar.
     app.state.monitor = asyncio.create_task(monitor_loop())
+    app.state.automations = asyncio.create_task(worker_loop())
+    await db.automation_runs.create_index([("status", 1), ("resume_at", 1), ("created_at", 1)])
+    await db.automation_runs.create_index([("automation_id", 1), ("conversation_id", 1)])
+    await db.automation_versions.create_index([("automation_id", 1), ("version", -1)], unique=True)
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    monitor = getattr(app.state, "monitor", None)
-    if monitor:
-        monitor.cancel()
+    for task in (getattr(app.state, "monitor", None), getattr(app.state, "automations", None)):
+        if task:
+            task.cancel()
     client.close()

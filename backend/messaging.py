@@ -198,13 +198,25 @@ async def _start_automations(
         "connection_id": integration_id,
         "trigger.event": {"$in": ["message_received", "incoming_message"]},
     }
-    automations = await db.automations.find(query).to_list(100)
     now = datetime.now(timezone.utc)
+
+    # Resposta a um menu: retoma a execução que esperava por ela.
+    waiting = await db.automation_runs.find(
+        {"workspace_id": workspace_id, "conversation_id": conversation_id, "status": "waiting_reply"}
+    ).to_list(20)
+    for run in waiting:
+        message = await db.messages.find_one({"_id": ObjectId(message_id)}, {"content": 1})
+        await db.automation_runs.update_one({"_id": run["_id"], "status": "waiting_reply"}, {"$set": {
+            "status": "queued", "resume_reply": (message or {}).get("content", ""), "updated_at": now}})
+
+    automations = await db.automations.find(query).to_list(100)
     for automation in automations:
-        run_key = f"{automation['_id']}:{message_id}"
-        existing = await db.automation_runs.find_one({"run_key": run_key})
-        if existing:
+        # Uma execução por fluxo por conversa. Antes cada mensagem do lead
+        # disparava o fluxo de novo — a boas-vindas saía a cada "oi".
+        if await db.automation_runs.find_one({"automation_id": str(automation["_id"]), "conversation_id": conversation_id}):
             continue
+        published = automation.get("published") or {}
+        run_key = f"{automation['_id']}:{message_id}"
         await db.automation_runs.insert_one({
             "run_key": run_key,
             "workspace_id": workspace_id,
@@ -215,8 +227,11 @@ async def _start_automations(
             "trigger_message_id": message_id,
             "status": "queued",
             "current_node_id": None,
-            "nodes": automation.get("nodes", []),
-            "edges": automation.get("edges", []),
+            # A execução carrega a versão publicada: editar o rascunho não muda
+            # quem já está no fluxo.
+            "version": published.get("version"),
+            "nodes": published.get("nodes", automation.get("nodes", [])),
+            "edges": published.get("edges", automation.get("edges", [])),
             "created_at": now,
             "updated_at": now,
         })
