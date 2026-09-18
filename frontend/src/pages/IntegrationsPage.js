@@ -310,9 +310,9 @@ export default function IntegrationsPage() {
                     <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(first._id)} aria-label="Remover"><Trash2 size={13} /></Button>
                   </div>
                 ) : (
-                  <Button size="sm" className="h-7 text-[10px]" onClick={() => { setForm({ provider: provider.id }); setCredFields({}); setShowCreate(true); }} data-testid={`connect-${provider.id}`}>
-                    Conectar
-                  </Button>
+                  <button type="button" className="text-action" onClick={() => { setForm({ provider: provider.id }); setCredFields({}); setShowCreate(true); }} data-testid={`connect-${provider.id}`}>
+                    Configurar
+                  </button>
                 )}
               </div>
             </div>
